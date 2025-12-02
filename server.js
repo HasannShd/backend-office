@@ -1,35 +1,37 @@
-// npm
-const dotenv = require('dotenv');
-dotenv.config();
+require('dotenv').config();
 const express = require('express');
-const app = express();
-const mongoose = require('mongoose');
 const cors = require('cors');
-const logger = require('morgan');
+const mongoose = require('mongoose');
 
-// Import routers
-const authRouter = require('./controllers/auth');
-const testJwtRouter = require('./controllers/test-jwt');
-const usersRouter = require('./controllers/users');
+const authRoutes = require('./controllers/auth');
+const userRoutes = require('./controllers/users');
+const productRoutes = require('./controllers/products');
+const categoryRoutes = require('./controllers/categories');
+const uploadRoutes = require('./controllers/uploads');
+const app = express();
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI);
-
-mongoose.connection.on('connected', () => {
-  console.log(`Connected to MongoDB ${mongoose.connection.name}.`);
-});
-
-// Middleware
-app.use(cors());
+app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
 app.use(express.json());
-app.use(logger('dev'));
 
-// Routes
-app.use('/auth', authRouter);
-app.use('/test-jwt', testJwtRouter);
-app.use('/users', usersRouter);
-
-// Start the server and listen on port 3000
-app.listen(3000, () => {
-  console.log('The express app is ready!');
+app.get('/', (req, res) => {
+  res.json({ message: 'Server is running' });
 });
+
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/products', productRoutes);
+app.use('/api/categories', categoryRoutes);
+app.use('/api/upload', uploadRoutes);
+
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => {
+    console.log('MongoDB connected');
+    app.listen(process.env.PORT || 5000, () =>
+      console.log(`Server running on port ${process.env.PORT || 5000}`)
+    );
+  })
+  .catch(err => {
+    console.error('MongoDB connection error:', err.message);
+    process.exit(1);
+  });

@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Admin Demo</title>
+    <style>body{font-family:system-ui,Arial;margin:20px}label{display:block;margin-top:8px}button{margin-top:8px}</style>
+  </head>
+  <body>
+    <h1>Backend Admin Demo</h1>
+    <p>This page demonstrates sign-up, sign-in, fetching <code>/api/auth/me</code>, and calling an admin-protected endpoint.</p>
+
+    <div>
+      <label>Username <input id="username" value="alice"></label>
+      <label>Password <input id="password" type="password" value="secret"></label>
+      <button id="signup">Sign Up</button>
+      <button id="signin">Sign In</button>
+    </div>
+
+    <h2>Token</h2>
+    <pre id="token">(no token)</pre>
+
+    <button id="me">Get /api/auth/me</button>
+    <pre id="meResp"></pre>
+
+    <h2>Admin action: create category</h2>
+    <label>Category name <input id="catName" value="DemoCat"></label>
+    <button id="createCat">Create Category (admin)</button>
+    <pre id="catResp"></pre>
+
+    <script>
+      const API = 'http://localhost:5000';
+
+      function setToken(t){
+        localStorage.setItem('token', t);
+        document.getElementById('token').textContent = t || '(no token)';
+      }
+
+      document.getElementById('signup').addEventListener('click', async ()=>{
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        const res = await fetch(`${API}/api/auth/sign-up`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (data.token) setToken(data.token);
+        else alert(JSON.stringify(data));
+      });
+
+      document.getElementById('signin').addEventListener('click', async ()=>{
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        const res = await fetch(`${API}/api/auth/sign-in`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (data.token) setToken(data.token);
+        else alert(JSON.stringify(data));
+      });
+
+      document.getElementById('me').addEventListener('click', async ()=>{
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${API}/api/auth/me`, {
+          headers: { Authorization: 'Bearer ' + token }
+        });
+        const data = await res.json();
+        document.getElementById('meResp').textContent = JSON.stringify(data, null, 2);
+      });
+
+      document.getElementById('createCat').addEventListener('click', async ()=>{
+        const token = localStorage.getItem('token');
+        const name = document.getElementById('catName').value;
+        const res = await fetch(`${API}/api/categories`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({ name })
+        });
+        const data = await res.json();
+        document.getElementById('catResp').textContent = JSON.stringify(data, null, 2);
+      });
+
+      // Initialize UI from existing token
+      setToken(localStorage.getItem('token'));
+    </script>
+  </body>
+</html>

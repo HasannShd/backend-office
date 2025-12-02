@@ -17,7 +17,7 @@ router.get('/', verifyToken, async (req, res) => {
 
 router.get('/:userId', verifyToken, async (req, res) => {
   try {
-    if (req.user._id !== req.params.userId){
+    if (req.user._id.toString() !== req.params.userId){
       return res.status(403).json({ err: "Unauthorized"});
     }
 
