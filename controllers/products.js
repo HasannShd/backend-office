@@ -15,13 +15,14 @@ router.get('/', async (req, res) => {
   if (category) filter.category = category;
   if (search) filter.name = { $regex: search, $options: 'i' };
 
-  const products = await Product.find(filter).populate('category');
+  const products = await Product.find(filter).populate('categorySlug');
+  // console.log(products);
   res.json(products);
 });
 
 // Get single product
 router.get('/:id', async (req, res) => {
-  const product = await Product.findById(req.params.id).populate('category');
+  const product = await Product.findById(req.params.id).populate('categorySlug');
   if (!product) return res.status(404).json({ message: 'Not found' });
   res.json(product);
 });
