@@ -9,20 +9,50 @@ const verifyToken = require('../middleware/verify-token');
 
 const saltRounds = 12;
 
-router.post('/sign-up', async (req, res) => {
+const buildPayload = (user) => ({
+  username: user.username,
+  _id: user._id,
+  role: user.role,
+});
+
+const findUserByIdentifier = async (identifier) => {
+  if (!identifier) return null;
+  return User.findOne({
+    $or: [{ username: identifier }, { email: identifier }, { phone: identifier }],
+  });
+};
+
+const normalizeUsername = (email, username) => {
+  if (username && username.trim()) return username.trim();
+  return email.trim().toLowerCase();
+};
+
+const signUpHandler = async (req, res) => {
   try {
-    const userInDatabase = await User.findOne({ username: req.body.username });
+    const { username, email, phone, password, name, marketingOptIn } = req.body;
+    if (!email || !phone || !password) {
+      return res.status(400).json({ err: 'Email, phone, and password are required.' });
+    }
+
+    const normalizedUsername = normalizeUsername(email, username);
+    const userInDatabase = await User.findOne({
+      $or: [{ username: normalizedUsername }, { email }, { phone }],
+    });
     
     if (userInDatabase) {
-      return res.status(409).json({err: 'Username already taken.'});
+      return res.status(409).json({ err: 'User already exists.' });
     }
     
     const user = await User.create({
-      username: req.body.username,
-      hashedPassword: bcrypt.hashSync(req.body.password, saltRounds)
+      username: normalizedUsername,
+      email: email.trim().toLowerCase(),
+      phone: phone.trim(),
+      name,
+      marketingOptIn: !!marketingOptIn,
+      hashedPassword: bcrypt.hashSync(password, saltRounds),
     });
 
-    const payload = { username: user.username, _id: user._id, role: user.role };
+    const payload = buildPayload(user);
 
     const token = jwt.sign({ payload }, process.env.JWT_SECRET);
 
@@ -30,23 +60,25 @@ router.post('/sign-up', async (req, res) => {
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
-});
+};
 
-router.post('/sign-in', async (req, res) => {
+const signInHandler = async (req, res) => {
   try {
-    const user = await User.findOne({ username: req.body.username });
+    const identifier = req.body.identifier || req.body.username || req.body.email;
+    const { password } = req.body;
+    const user = await findUserByIdentifier(identifier);
     if (!user) {
       return res.status(401).json({ err: 'Invalid credentials.' });
     }
 
     const isPasswordCorrect = bcrypt.compareSync(
-      req.body.password, user.hashedPassword
+      password, user.hashedPassword
     );
     if (!isPasswordCorrect) {
       return res.status(401).json({ err: 'Invalid credentials.' });
     }
 
-    const payload = { username: user.username, _id: user._id, role: user.role };
+    const payload = buildPayload(user);
 
     const token = jwt.sign({ payload }, process.env.JWT_SECRET);
 
@@ -54,7 +86,12 @@ router.post('/sign-in', async (req, res) => {
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
-});
+};
+
+router.post('/sign-up', signUpHandler);
+router.post('/register', signUpHandler);
+router.post('/sign-in', signInHandler);
+router.post('/login', signInHandler);
 
 // Get current logged-in user
 router.get('/me', verifyToken, async (req, res) => {

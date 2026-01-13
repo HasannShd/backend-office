@@ -2,16 +2,29 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const authRoutes = require('./controllers/auth');
 const userRoutes = require('./controllers/users');
 const productRoutes = require('./controllers/products');
 const categoryRoutes = require('./controllers/categories');
 const uploadRoutes = require('./controllers/uploads');
+const cartRoutes = require('./controllers/cart');
+const orderRoutes = require('./controllers/orders');
+const careersRoutes = require('./controllers/careers');
 const app = express();
 
+app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
 app.use(express.json());
+
+const authLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+});
+
+app.use('/api/auth', authLimiter);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Server is running' });
@@ -22,6 +35,9 @@ app.use('/api/users', userRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/cart', cartRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/careers', careersRoutes);
 
 mongoose
   .connect(process.env.MONGO_URI)

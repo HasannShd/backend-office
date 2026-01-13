@@ -11,6 +11,17 @@ router.get('/', async (req, res) => {
   res.json(categories);
 });
 
+// Get single category
+router.get('/:id', async (req, res) => {
+  try {
+    const category = await Category.findById(req.params.id);
+    if (!category) return res.status(404).json({ message: 'Not found' });
+    res.json(category);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ADMIN
 router.post('/', verifyToken, isAdmin, async (req, res) => {
   try {

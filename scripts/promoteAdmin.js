@@ -17,8 +17,7 @@ async function run() {
       console.error('User not found:', username);
       process.exit(1);
     }
-    user.role = 'admin';
-    await user.save();
+    await User.updateOne({ _id: user._id }, { $set: { role: 'admin' } });
     console.log(`User ${username} promoted to admin`);
     process.exit(0);
   } catch (err) {

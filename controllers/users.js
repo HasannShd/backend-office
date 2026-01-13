@@ -4,11 +4,23 @@ const router = express.Router();
 const User = require('../models/user');
 
 const verifyToken = require('../middleware/verify-token');
+const isAdmin = require('../middleware/is-admin');
 
-router.get('/', verifyToken, async (req, res) => {
+router.get('/', verifyToken, isAdmin, async (req, res) => {
   try {
     const users = await User.find({}, "username");
 
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ err: err.message });
+  }
+});
+
+router.get('/marketing', verifyToken, isAdmin, async (req, res) => {
+  try {
+    const users = await User.find({ marketingOptIn: true })
+      .select('name email phone')
+      .lean();
     res.json(users);
   } catch (err) {
     res.status(500).json({ err: err.message });
