@@ -1,5 +1,7 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Product = require('../models/product');
+const Category = require('../models/category');
 const verifyToken = require('../middleware/verify-token');
 const isAdmin = require('../middleware/is-admin');
 
@@ -13,7 +15,17 @@ router.get('/', async (req, res) => {
     const { category, search, featured, page = 1, limit = 20 } = req.query;
     const filter = { isActive: true };
 
-    if (category) filter.categorySlug = category;
+    if (category) {
+      if (mongoose.isValidObjectId(category)) {
+        filter.categorySlug = category;
+      } else {
+        const categoryDoc = await Category.findOne({ slug: category }).select('_id');
+        if (!categoryDoc) {
+          return res.json({ items: [], total: 0 });
+        }
+        filter.categorySlug = categoryDoc._id;
+      }
+    }
     if (search) filter.name = { $regex: search, $options: 'i' };
     if (featured === 'true') filter.featured = true;
 

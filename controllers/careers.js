@@ -12,7 +12,7 @@ router.post('/apply', upload.single('cv'), async (req, res) => {
       return res.status(400).json({ message: 'All fields and CV are required.' });
     }
 
-    const to = process.env.CAREERS_NOTIFY_EMAIL || process.env.SMTP_FROM;
+    const to = process.env.CV_NOTIFY_EMAIL || process.env.CAREERS_NOTIFY_EMAIL || process.env.SMTP_FROM;
     if (to) {
       await sendMail({
         to,

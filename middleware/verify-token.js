@@ -5,7 +5,10 @@ function verifyToken(req, res, next) {
     if (!req.headers.authorization) {
       return res.status(401).json({ err: 'No token provided.' });
     }
-    const token = req.headers.authorization.split(' ')[1];
+    const [scheme, token] = req.headers.authorization.split(' ');
+    if (scheme !== 'Bearer' || !token) {
+      return res.status(401).json({ err: 'Invalid token format.' });
+    }
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     req.user = decoded.payload;

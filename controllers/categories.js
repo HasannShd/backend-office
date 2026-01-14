@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Category = require('../models/category');
 const verifyToken = require('../middleware/verify-token');
 const isAdmin = require('../middleware/is-admin');
@@ -11,10 +12,36 @@ router.get('/', async (req, res) => {
   res.json(categories);
 });
 
-// Get single category
+const slugify = (value) =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+
+const buildUniqueSlug = async (base, excludeId) => {
+  let slug = base;
+  let counter = 2;
+  // ensure uniqueness while allowing the same doc to keep its slug
+  while (await Category.findOne({ slug, _id: { $ne: excludeId } })) {
+    slug = `${base}-${counter}`;
+    counter += 1;
+  }
+  return slug;
+};
+
+// Get single category (by id or slug)
 router.get('/:id', async (req, res) => {
   try {
-    const category = await Category.findById(req.params.id);
+    const value = req.params.id;
+    let category = null;
+    if (mongoose.isValidObjectId(value)) {
+      category = await Category.findById(value);
+    }
+    if (!category) {
+      category = await Category.findOne({ slug: value });
+    }
     if (!category) return res.status(404).json({ message: 'Not found' });
     res.json(category);
   } catch (err) {
@@ -25,7 +52,12 @@ router.get('/:id', async (req, res) => {
 // ADMIN
 router.post('/', verifyToken, isAdmin, async (req, res) => {
   try {
-    const category = await Category.create(req.body);
+    const payload = { ...req.body };
+    if (!payload.slug && payload.name) {
+      const base = slugify(payload.name);
+      payload.slug = await buildUniqueSlug(base);
+    }
+    const category = await Category.create(payload);
     res.status(201).json(category);
   } catch (err) {
     res.status(400).json({ message: err.message });
@@ -34,11 +66,14 @@ router.post('/', verifyToken, isAdmin, async (req, res) => {
 
 router.put('/:id', verifyToken, isAdmin, async (req, res) => {
   try {
-    const category = await Category.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true }
-    );
+    const payload = { ...req.body };
+    if (!payload.slug && payload.name) {
+      const base = slugify(payload.name);
+      payload.slug = await buildUniqueSlug(base, req.params.id);
+    }
+    const category = await Category.findByIdAndUpdate(req.params.id, payload, {
+      new: true,
+    });
     res.json(category);
   } catch (err) {
     res.status(400).json({ message: err.message });

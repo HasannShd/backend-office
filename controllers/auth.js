@@ -54,7 +54,7 @@ const signUpHandler = async (req, res) => {
 
     const payload = buildPayload(user);
 
-    const token = jwt.sign({ payload }, process.env.JWT_SECRET);
+    const token = jwt.sign({ payload }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.status(201).json({ token });
   } catch (err) {
@@ -80,7 +80,7 @@ const signInHandler = async (req, res) => {
 
     const payload = buildPayload(user);
 
-    const token = jwt.sign({ payload }, process.env.JWT_SECRET);
+    const token = jwt.sign({ payload }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.status(200).json({ token });
   } catch (err) {
