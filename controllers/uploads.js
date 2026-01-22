@@ -25,8 +25,20 @@ const router = express.Router();
 
 // ADMIN-ONLY IMAGE UPLOAD
 router.post('/', verifyToken, isAdmin, upload.single('image'), (req, res) => {
-  // multer-storage-cloudinary puts the Cloudinary URL on req.file.path
-  return res.status(201).json({ url: req.file.path });
+  try {
+    if (!req.file || !req.file.path) {
+      return res.status(400).json({ message: 'No image received.' });
+    }
+    return res.status(201).json({ url: req.file.path });
+  } catch (err) {
+    return res.status(500).json({ message: err.message || 'Upload failed.' });
+  }
+});
+
+// Surface Cloudinary/multer errors for easier debugging
+router.use((err, req, res, next) => {
+  console.error('[upload]', err);
+  res.status(500).json({ message: err.message || 'Upload failed.' });
 });
 
 module.exports = router;

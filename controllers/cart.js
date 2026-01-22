@@ -27,7 +27,7 @@ router.get('/', verifyToken, async (req, res) => {
 
 router.post('/items', verifyToken, async (req, res) => {
   try {
-    const { productId, variantId, quantity } = req.body;
+    const { productId, variantId, quantity, size } = req.body;
     if (!productId || !quantity || quantity < 1) {
       return res.status(400).json({ message: 'Product and quantity are required.' });
     }
@@ -44,8 +44,19 @@ router.post('/items', verifyToken, async (req, res) => {
     if (variant && variant.isActive === false) {
       return res.status(400).json({ message: 'Variant is inactive.' });
     }
-    if (variant && Number.isFinite(variant.stock) && quantity > variant.stock) {
-      return res.status(400).json({ message: 'Not enough stock.' });
+    let selectedSizeLabel = '';
+    if (variant?.sizes?.length) {
+      const sizeEntry = variant.sizes.find(entry => {
+        const label = [entry.size, entry.inches, entry.color].filter(Boolean).join(' / ');
+        return label === size;
+      });
+      if (!sizeEntry) {
+        return res.status(400).json({ message: 'Size not found for this variant.' });
+      }
+      if (sizeEntry.outOfStock) {
+        return res.status(400).json({ message: 'Selected size is out of stock.' });
+      }
+      selectedSizeLabel = [sizeEntry.size, sizeEntry.inches, sizeEntry.color].filter(Boolean).join(' / ');
     }
 
     const cart = await ensureCart(req.user._id);
@@ -55,12 +66,15 @@ router.post('/items', verifyToken, async (req, res) => {
     );
 
     const price = variant?.price ?? product.basePrice ?? 0;
+    const variantSize = variant
+      ? [variant.type, selectedSizeLabel].filter(Boolean).join(' / ')
+      : '';
     const itemPayload = {
       product: product._id,
       variantId: variant?._id,
       name: product.name,
       sku: variant?.sku || product.sku,
-      size: variant?.size || variant?.name,
+      size: variantSize || variant?.name,
       image: product.image || product.images?.[0],
       price,
       quantity,

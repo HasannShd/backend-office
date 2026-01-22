@@ -8,13 +8,24 @@ const specSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const variantSizeSchema = new mongoose.Schema(
+  {
+    size: String,
+    inches: String,
+    color: String,
+    outOfStock: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
+
 const variantSchema = new mongoose.Schema(
   {
     name: String,
-    size: String,
+    type: String,
     sku: String,
+    image: String,
     price: { type: Number, required: true },
-    stock: { type: Number, default: 0 },
+    sizes: [variantSizeSchema],
     isActive: { type: Boolean, default: true },
     specs: [specSchema],
   },
