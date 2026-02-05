@@ -45,8 +45,9 @@ router.post('/items', verifyToken, async (req, res) => {
       return res.status(400).json({ message: 'Variant is inactive.' });
     }
     let selectedSizeLabel = '';
+    let sizeEntry = null;
     if (variant?.sizes?.length) {
-      const sizeEntry = variant.sizes.find(entry => {
+      sizeEntry = variant.sizes.find(entry => {
         const label = [entry.size, entry.inches, entry.color].filter(Boolean).join(' / ');
         return label === size;
       });
@@ -60,21 +61,29 @@ router.post('/items', verifyToken, async (req, res) => {
     }
 
     const cart = await ensureCart(req.user._id);
-    const existingItem = cart.items.find(item =>
-      item.product.toString() === productId &&
-      String(item.variantId || '') === String(variantId || '')
-    );
-
-    const price = variant?.price ?? product.basePrice ?? 0;
-    const variantSize = variant
+    const variantSizeLabel = variant
       ? [variant.type, selectedSizeLabel].filter(Boolean).join(' / ')
       : '';
+    const existingItem = cart.items.find(item =>
+      item.product.toString() === productId &&
+      String(item.variantId || '') === String(variantId || '') &&
+      String(item.size || '') === String(variantSizeLabel || '')
+    );
+
+    const sizePrice = Number(sizeEntry?.price);
+    const variantPrice = Number(variant?.price);
+    const basePrice = Number(product.basePrice);
+    const price = Number.isFinite(sizePrice) && sizePrice > 0
+      ? sizePrice
+      : (Number.isFinite(variantPrice) && variantPrice > 0
+          ? variantPrice
+          : (Number.isFinite(basePrice) ? basePrice : 0));
     const itemPayload = {
       product: product._id,
       variantId: variant?._id,
       name: product.name,
       sku: variant?.sku || product.sku,
-      size: variantSize || variant?.name,
+      size: variantSizeLabel || variant?.name,
       image: product.image || product.images?.[0],
       price,
       quantity,

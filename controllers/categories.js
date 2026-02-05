@@ -8,7 +8,11 @@ const router = express.Router();
 
 // PUBLIC
 router.get('/', async (req, res) => {
-  const categories = await Category.find().sort('name');
+  const categories = await Category.find()
+    .select('name slug description image')
+    .sort('name')
+    .lean();
+  res.set('Cache-Control', 'public, max-age=120');
   res.json(categories);
 });
 
@@ -37,10 +41,10 @@ router.get('/:id', async (req, res) => {
     const value = req.params.id;
     let category = null;
     if (mongoose.isValidObjectId(value)) {
-      category = await Category.findById(value);
+      category = await Category.findById(value).lean();
     }
     if (!category) {
-      category = await Category.findOne({ slug: value });
+      category = await Category.findOne({ slug: value }).lean();
     }
     if (!category) return res.status(404).json({ message: 'Not found' });
     res.json(category);

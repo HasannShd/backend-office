@@ -13,6 +13,7 @@ const variantSizeSchema = new mongoose.Schema(
     size: String,
     inches: String,
     color: String,
+    price: { type: Number },
     outOfStock: { type: Boolean, default: false },
   },
   { _id: false }

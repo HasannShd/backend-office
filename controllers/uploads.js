@@ -1,18 +1,23 @@
 // controllers/uploads.js
 const express = require('express');
-const cloudinary = require('cloudinary').v2;
+const cloudinary = require('cloudinary');
 const multer = require('multer');
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const CloudinaryStorage = require('multer-storage-cloudinary');
 const verifyToken = require('../middleware/verify-token');
 const isAdmin = require('../middleware/is-admin');
 
-cloudinary.config({
+const cloudinaryV2 = cloudinary.v2 || cloudinary;
+if (!cloudinary.v2) {
+  cloudinary.v2 = cloudinaryV2;
+}
+
+cloudinaryV2.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key:    process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const storage = new CloudinaryStorage({
+const storage = CloudinaryStorage({
   cloudinary,
   params: {
     folder: 'LTE-products',        // folder name in Cloudinary
@@ -26,10 +31,11 @@ const router = express.Router();
 // ADMIN-ONLY IMAGE UPLOAD
 router.post('/', verifyToken, isAdmin, upload.single('image'), (req, res) => {
   try {
-    if (!req.file || !req.file.path) {
+    const uploadedUrl = req.file?.path || req.file?.secure_url || req.file?.url;
+    if (!req.file || !uploadedUrl) {
       return res.status(400).json({ message: 'No image received.' });
     }
-    return res.status(201).json({ url: req.file.path });
+    return res.status(201).json({ url: uploadedUrl });
   } catch (err) {
     return res.status(500).json({ message: err.message || 'Upload failed.' });
   }

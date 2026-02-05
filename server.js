@@ -4,6 +4,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const compression = require('compression');
 
 const authRoutes = require('./controllers/auth');
 const userRoutes = require('./controllers/users');
@@ -17,6 +18,7 @@ const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+app.use(compression());
 app.use(express.json({ limit: '2mb' }));
 
 const authLimiter = rateLimit({
