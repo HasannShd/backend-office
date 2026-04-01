@@ -27,6 +27,9 @@ const cartRoutes = require('./controllers/cart');
 const orderRoutes = require('./controllers/orders');
 const careersRoutes = require('./controllers/careers');
 const app = express();
+const port = process.env.PORT || 5000;
+let mongoReady = false;
+let mongoConnectInFlight = false;
 
 console.log('Boot config:', {
   hasMongoUri: Boolean(mongoUri),
@@ -58,7 +61,7 @@ app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter);
 
 app.get('/', (req, res) => {
-  res.json({ message: 'Server is running' });
+  res.json({ message: 'Server is running', mongoReady });
 });
 
 app.use('/api/auth', authRoutes);
@@ -86,29 +89,36 @@ mongoose.connection.on('connecting', () => {
 
 mongoose.connection.on('connected', () => {
   console.log('MongoDB connected');
+  mongoReady = true;
 });
 
 mongoose.connection.on('error', (error) => {
   console.error('MongoDB connection event error:', error);
+  mongoReady = false;
 });
 
 mongoose.connection.on('disconnected', () => {
   console.error('MongoDB disconnected');
+  mongoReady = false;
 });
 
-const start = async () => {
+const connectToMongo = async () => {
+  if (mongoConnectInFlight || mongoReady) return;
+  mongoConnectInFlight = true;
   try {
     await mongoose.connect(mongoUri, {
       serverSelectionTimeoutMS: 15000,
       family: 4,
     });
-    app.listen(process.env.PORT || 5000, () =>
-      console.log(`Server running on port ${process.env.PORT || 5000}`)
-    );
   } catch (err) {
     console.error('MongoDB connection error:', err);
-    process.exit(1);
+  } finally {
+    mongoConnectInFlight = false;
   }
 };
 
-start();
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+  connectToMongo();
+  setInterval(connectToMongo, 30000);
+});
