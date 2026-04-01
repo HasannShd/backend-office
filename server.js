@@ -1,4 +1,14 @@
 require('dotenv').config();
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+  process.exit(1);
+});
+
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -15,6 +25,16 @@ const cartRoutes = require('./controllers/cart');
 const orderRoutes = require('./controllers/orders');
 const careersRoutes = require('./controllers/careers');
 const app = express();
+
+console.log('Boot config:', {
+  hasMongoUri: Boolean(process.env.MONGO_URI),
+  hasClientUrl: Boolean(process.env.CLIENT_URL),
+  hasCloudinary: Boolean(
+    process.env.CLOUDINARY_CLOUD_NAME &&
+    process.env.CLOUDINARY_API_KEY &&
+    process.env.CLOUDINARY_API_SECRET
+  ),
+});
 
 app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
@@ -46,6 +66,11 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/careers', careersRoutes);
+
+if (!process.env.MONGO_URI) {
+  console.error('Missing required environment variable: MONGO_URI');
+  process.exit(1);
+}
 
 mongoose
   .connect(process.env.MONGO_URI)
