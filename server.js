@@ -1,5 +1,7 @@
 require('dotenv').config();
 
+const mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI;
+
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled rejection:', reason);
 });
@@ -27,8 +29,9 @@ const careersRoutes = require('./controllers/careers');
 const app = express();
 
 console.log('Boot config:', {
-  hasMongoUri: Boolean(process.env.MONGO_URI),
+  hasMongoUri: Boolean(mongoUri),
   hasClientUrl: Boolean(process.env.CLIENT_URL),
+  hasJwtSecret: Boolean(process.env.JWT_SECRET),
   hasCloudinary: Boolean(
     process.env.CLOUDINARY_CLOUD_NAME &&
     process.env.CLOUDINARY_API_KEY &&
@@ -67,20 +70,45 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/careers', careersRoutes);
 
-if (!process.env.MONGO_URI) {
-  console.error('Missing required environment variable: MONGO_URI');
+if (!mongoUri) {
+  console.error('Missing required environment variable: MONGO_URI or MONGODB_URI');
   process.exit(1);
 }
 
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => {
-    console.log('MongoDB connected');
+if (!process.env.JWT_SECRET) {
+  console.error('Missing required environment variable: JWT_SECRET');
+  process.exit(1);
+}
+
+mongoose.connection.on('connecting', () => {
+  console.log('MongoDB connecting...');
+});
+
+mongoose.connection.on('connected', () => {
+  console.log('MongoDB connected');
+});
+
+mongoose.connection.on('error', (error) => {
+  console.error('MongoDB connection event error:', error);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.error('MongoDB disconnected');
+});
+
+const start = async () => {
+  try {
+    await mongoose.connect(mongoUri, {
+      serverSelectionTimeoutMS: 15000,
+      family: 4,
+    });
     app.listen(process.env.PORT || 5000, () =>
       console.log(`Server running on port ${process.env.PORT || 5000}`)
     );
-  })
-  .catch(err => {
-    console.error('MongoDB connection error:', err.message);
+  } catch (err) {
+    console.error('MongoDB connection error:', err);
     process.exit(1);
-  });
+  }
+};
+
+start();
