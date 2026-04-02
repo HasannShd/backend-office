@@ -34,6 +34,7 @@ let mongoConnectInFlight = false;
 console.log('Boot config:', {
   hasMongoUri: Boolean(mongoUri),
   hasClientUrl: Boolean(process.env.CLIENT_URL),
+  hasAllowedOrigins: Boolean(process.env.ALLOWED_ORIGINS),
   hasJwtSecret: Boolean(process.env.JWT_SECRET),
   hasCloudinary: Boolean(
     process.env.CLOUDINARY_CLOUD_NAME &&
@@ -42,8 +43,35 @@ console.log('Boot config:', {
   ),
 });
 
+const allowedOrigins = Array.from(
+  new Set(
+    [
+      process.env.CLIENT_URL,
+      process.env.CLIENT_URL_2,
+      process.env.CLIENT_URL_3,
+      ...(process.env.ALLOWED_ORIGINS || '')
+        .split(',')
+        .map((value) => value.trim()),
+      'https://www.lte-bh.com',
+      'https://lte-bh.com',
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+    ].filter(Boolean)
+  )
+);
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`Origin ${origin} is not allowed by CORS`));
+  },
+  credentials: true,
+};
+
 app.use(helmet());
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+app.use(cors(corsOptions));
 app.use(compression());
 app.use(express.json({ limit: '2mb' }));
 
