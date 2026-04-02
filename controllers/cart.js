@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Cart = require('../models/cart');
 const Product = require('../models/product');
 const verifyToken = require('../middleware/verify-token');
@@ -30,6 +31,9 @@ router.post('/items', verifyToken, async (req, res) => {
     const { productId, variantId, quantity, size } = req.body;
     if (!productId || !quantity || quantity < 1) {
       return res.status(400).json({ message: 'Product and quantity are required.' });
+    }
+    if (!mongoose.isValidObjectId(productId)) {
+      return res.status(400).json({ message: 'Invalid product id.' });
     }
 
     const product = await Product.findById(productId);
@@ -124,7 +128,7 @@ router.delete('/items/:itemId', verifyToken, async (req, res) => {
     const cart = await ensureCart(req.user._id);
     const item = cart.items.id(req.params.itemId);
     if (!item) return res.status(404).json({ message: 'Item not found.' });
-    item.remove();
+    item.deleteOne();
     await cart.save();
     res.json(cart);
   } catch (err) {

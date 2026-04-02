@@ -17,8 +17,14 @@ const buildPayload = (user) => ({
 
 const findUserByIdentifier = async (identifier) => {
   if (!identifier) return null;
+  const normalizedIdentifier = String(identifier).trim();
+  const normalizedEmailIdentifier = normalizedIdentifier.toLowerCase();
   return User.findOne({
-    $or: [{ username: identifier }, { email: identifier }, { phone: identifier }],
+    $or: [
+      { username: normalizedIdentifier },
+      { email: normalizedEmailIdentifier },
+      { phone: normalizedIdentifier },
+    ],
   });
 };
 
@@ -27,6 +33,9 @@ const normalizeUsername = (email, username) => {
   return email.trim().toLowerCase();
 };
 
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+const normalizePhone = (phone) => String(phone || '').trim();
+
 const signUpHandler = async (req, res) => {
   try {
     const { username, email, phone, password, name, marketingOptIn } = req.body;
@@ -34,9 +43,11 @@ const signUpHandler = async (req, res) => {
       return res.status(400).json({ err: 'Email, phone, and password are required.' });
     }
 
-    const normalizedUsername = normalizeUsername(email, username);
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedPhone = normalizePhone(phone);
+    const normalizedUsername = normalizeUsername(normalizedEmail, username);
     const userInDatabase = await User.findOne({
-      $or: [{ username: normalizedUsername }, { email }, { phone }],
+      $or: [{ username: normalizedUsername }, { email: normalizedEmail }, { phone: normalizedPhone }],
     });
     
     if (userInDatabase) {
@@ -45,8 +56,8 @@ const signUpHandler = async (req, res) => {
     
     const user = await User.create({
       username: normalizedUsername,
-      email: email.trim().toLowerCase(),
-      phone: phone.trim(),
+      email: normalizedEmail,
+      phone: normalizedPhone,
       name,
       marketingOptIn: !!marketingOptIn,
       hashedPassword: bcrypt.hashSync(password, saltRounds),
@@ -64,7 +75,8 @@ const signUpHandler = async (req, res) => {
 
 const signInHandler = async (req, res) => {
   try {
-    const identifier = req.body.identifier || req.body.username || req.body.email;
+    const rawIdentifier = req.body.identifier || req.body.username || req.body.email;
+    const identifier = typeof rawIdentifier === 'string' ? rawIdentifier.trim() : rawIdentifier;
     const { password } = req.body;
     const user = await findUserByIdentifier(identifier);
     if (!user) {

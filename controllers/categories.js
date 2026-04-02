@@ -8,12 +8,16 @@ const router = express.Router();
 
 // PUBLIC
 router.get('/', async (req, res) => {
-  const categories = await Category.find()
-    .select('name slug description image')
-    .sort('name')
-    .lean();
-  res.set('Cache-Control', 'public, max-age=120');
-  res.json(categories);
+  try {
+    const categories = await Category.find()
+      .select('name slug description image')
+      .sort('name')
+      .lean();
+    res.set('Cache-Control', 'public, max-age=120');
+    res.json(categories);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 const slugify = (value) =>
@@ -78,6 +82,9 @@ router.put('/:id', verifyToken, isAdmin, async (req, res) => {
     const category = await Category.findByIdAndUpdate(req.params.id, payload, {
       new: true,
     });
+    if (!category) {
+      return res.status(404).json({ message: 'Category not found' });
+    }
     res.json(category);
   } catch (err) {
     res.status(400).json({ message: err.message });
@@ -86,7 +93,10 @@ router.put('/:id', verifyToken, isAdmin, async (req, res) => {
 
 router.delete('/:id', verifyToken, isAdmin, async (req, res) => {
   try {
-    await Category.findByIdAndDelete(req.params.id);
+    const category = await Category.findByIdAndDelete(req.params.id);
+    if (!category) {
+      return res.status(404).json({ message: 'Category not found' });
+    }
     res.json({ message: 'Category deleted' });
   } catch (err) {
     res.status(400).json({ message: err.message });

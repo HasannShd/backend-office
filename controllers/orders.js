@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Order = require('../models/order');
 const User = require('../models/user');
 const Cart = require('../models/cart');
@@ -59,6 +60,9 @@ router.post('/checkout', verifyToken, async (req, res) => {
     }
     if (!['cod', 'bank', 'tap'].includes(paymentMethod)) {
       return res.status(400).json({ message: 'Invalid payment method.' });
+    }
+    if (paymentMethod === 'tap') {
+      return res.status(503).json({ message: 'Tap checkout is not available yet.' });
     }
 
     const cart = await Cart.findOne({ user: req.user._id });
@@ -128,6 +132,13 @@ router.get('/admin', verifyToken, isAdmin, async (req, res) => {
 router.patch('/:id/status', verifyToken, isAdmin, async (req, res) => {
   try {
     const { status, note } = req.body;
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid order id' });
+    }
+    const allowedStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
+    if (status && !allowedStatuses.includes(status)) {
+      return res.status(400).json({ message: 'Invalid status value' });
+    }
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ message: 'Order not found' });
     order.status = status || order.status;
@@ -141,6 +152,9 @@ router.patch('/:id/status', verifyToken, isAdmin, async (req, res) => {
 
 router.get('/:id', verifyToken, async (req, res) => {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid order id' });
+    }
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ message: 'Order not found' });
     if (order.user.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
@@ -154,6 +168,9 @@ router.get('/:id', verifyToken, async (req, res) => {
 
 router.get('/:id/invoice', verifyToken, async (req, res) => {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid order id' });
+    }
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ message: 'Order not found' });
     if (order.user.toString() !== req.user._id.toString() && req.user.role !== 'admin') {

@@ -4,7 +4,7 @@ const Product = require('../models/product');
 const Category = require('../models/category');
 const verifyToken = require('../middleware/verify-token');
 const isAdmin = require('../middleware/is-admin');
-const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 
 const router = express.Router();
 
@@ -73,46 +73,39 @@ router.get('/admin/export', verifyToken, isAdmin, async (req, res) => {
       .sort('name')
       .lean();
 
-    const productRows = [
-      ['Category', 'Product', 'Brand', 'Image', 'Price', 'Description', 'CategorySlug'],
-      ...products.map(product => ([
-        product.categorySlug?.name || '',
-        product.name || '',
-        product.brand || '',
-        product.image || '',
-        product.basePrice ?? '',
-        product.description || '',
-        product.categorySlug?.slug || '',
-      ])),
+    const workbook = new ExcelJS.Workbook();
+    const productSheet = workbook.addWorksheet('Products');
+    const categorySheet = workbook.addWorksheet('Categories');
+
+    productSheet.columns = [
+      { header: 'Category', key: 'category', width: 32 },
+      { header: 'Product', key: 'product', width: 44 },
+      { header: 'Brand', key: 'brand', width: 24 },
+      { header: 'Image', key: 'image', width: 32 },
+      { header: 'Price', key: 'price', width: 12 },
+      { header: 'Description', key: 'description', width: 44 },
+      { header: 'CategorySlug', key: 'categorySlug', width: 32 },
     ];
+    productSheet.addRows(products.map(product => ({
+      category: product.categorySlug?.name || '',
+      product: product.name || '',
+      brand: product.brand || '',
+      image: product.image || '',
+      price: product.basePrice ?? '',
+      description: product.description || '',
+      categorySlug: product.categorySlug?.slug || '',
+    })));
 
-    const categoryRows = [
-      ['Category', 'CategorySlug'],
-      ...categories.map(category => ([
-        category.name || '',
-        category.slug || '',
-      ])),
+    categorySheet.columns = [
+      { header: 'Category', key: 'category', width: 32 },
+      { header: 'CategorySlug', key: 'categorySlug', width: 32 },
     ];
+    categorySheet.addRows(categories.map(category => ({
+      category: category.name || '',
+      categorySlug: category.slug || '',
+    })));
 
-    const workbook = XLSX.utils.book_new();
-    const productSheet = XLSX.utils.aoa_to_sheet(productRows);
-    const categorySheet = XLSX.utils.aoa_to_sheet(categoryRows);
-
-    productSheet['!cols'] = [
-      { wch: 32 },
-      { wch: 44 },
-      { wch: 24 },
-      { wch: 32 },
-      { wch: 12 },
-      { wch: 44 },
-      { wch: 32 },
-    ];
-    categorySheet['!cols'] = [{ wch: 32 }, { wch: 32 }];
-
-    XLSX.utils.book_append_sheet(workbook, productSheet, 'Products');
-    XLSX.utils.book_append_sheet(workbook, categorySheet, 'Categories');
-
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
 
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.set('Content-Disposition', 'attachment; filename="products-categories.xlsx"');
@@ -198,6 +191,9 @@ router.post('/import', verifyToken, isAdmin, async (req, res) => {
 // Get single product
 router.get('/:id', async (req, res) => {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid product id' });
+    }
     const product = await Product.findById(req.params.id).populate('categorySlug').lean();
     if (!product) return res.status(404).json({ message: 'Not found' });
     res.json(product);
@@ -219,11 +215,17 @@ router.post('/', verifyToken, isAdmin, async (req, res) => {
 // Update product
 router.put('/:id', verifyToken, isAdmin, async (req, res) => {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid product id' });
+    }
     const product = await Product.findByIdAndUpdate(
       req.params.id,
       req.body,
       { new: true }
     );
+    if (!product) {
+      return res.status(404).json({ message: 'Not found' });
+    }
     res.json(product);
   } catch (err) {
     res.status(400).json({ message: err.message });
@@ -233,7 +235,13 @@ router.put('/:id', verifyToken, isAdmin, async (req, res) => {
 // Delete product
 router.delete('/:id', verifyToken, isAdmin, async (req, res) => {
   try {
-    await Product.findByIdAndDelete(req.params.id);
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid product id' });
+    }
+    const product = await Product.findByIdAndDelete(req.params.id);
+    if (!product) {
+      return res.status(404).json({ message: 'Not found' });
+    }
     res.json({ message: 'Product deleted' });
   } catch (err) {
     res.status(400).json({ message: err.message });
