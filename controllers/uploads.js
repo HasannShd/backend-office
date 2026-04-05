@@ -67,6 +67,18 @@ const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype) => new Pro
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)+/g, '')
     .slice(0, 80) || `upload-${Date.now()}`;
+  const extension = getFileExtension(originalname);
+  const normalizedMime = String(mimetype || '').toLowerCase();
+  const preferredFormat = (() => {
+    if (normalizedMime === 'image/png' || extension === '.png') return 'png';
+    if (normalizedMime === 'image/gif' || extension === '.gif') return 'gif';
+    if (normalizedMime === 'image/svg+xml' || extension === '.svg') return 'svg';
+    if (normalizedMime === 'image/webp' || extension === '.webp') return 'webp';
+    if (extension === '.heic' || extension === '.heif' || extension === '.avif' || extension === '.bmp' || extension === '.jfif') {
+      return 'jpg';
+    }
+    return 'jpg';
+  })();
 
   const uploadStream = cloudinaryV2.uploader.upload_stream(
     {
@@ -74,7 +86,7 @@ const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype) => new Pro
       resource_type: 'image',
       public_id: `${publicIdBase}-${Date.now()}`,
       overwrite: false,
-      format: mimetype === 'image/png' ? 'png' : undefined,
+      format: preferredFormat,
     },
     (error, result) => {
       if (error) return reject(error);
