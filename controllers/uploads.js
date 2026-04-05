@@ -31,6 +31,35 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
+const allowedImageExtensions = new Set([
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.bmp',
+  '.avif',
+  '.svg',
+  '.heic',
+  '.heif',
+  '.jfif',
+]);
+
+const getFileExtension = (filename = '') => {
+  const match = String(filename).toLowerCase().match(/\.[^.]+$/);
+  return match ? match[0] : '';
+};
+
+const isAllowedImageUpload = (file) => {
+  if (!file) return false;
+
+  const mime = String(file.mimetype || '').toLowerCase();
+  if (mime.startsWith('image/')) return true;
+
+  const extension = getFileExtension(file.originalname);
+  return allowedImageExtensions.has(extension);
+};
+
 const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype) => new Promise((resolve, reject) => {
   const publicIdBase = String(originalname || 'upload')
     .replace(/\.[^.]+$/, '')
@@ -68,7 +97,7 @@ router.post('/', verifyToken, isAdmin, upload.single('image'), async (req, res) 
       return res.status(400).json({ message: 'No image received.' });
     }
 
-    if (!req.file.mimetype || !req.file.mimetype.startsWith('image/')) {
+    if (!isAllowedImageUpload(req.file)) {
       return res.status(400).json({ message: 'Only image uploads are allowed.' });
     }
 
