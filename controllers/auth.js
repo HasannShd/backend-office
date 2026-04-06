@@ -13,6 +13,7 @@ const buildPayload = (user) => ({
   username: user.username,
   _id: user._id,
   role: user.role,
+  isActive: user.isActive,
 });
 
 const findUserByIdentifier = async (identifier) => {
@@ -90,9 +91,16 @@ const signInHandler = async (req, res) => {
       return res.status(401).json({ err: 'Invalid credentials.' });
     }
 
+    if (user.isActive === false) {
+      return res.status(403).json({ err: 'This account has been deactivated.' });
+    }
+
     const payload = buildPayload(user);
 
     const token = jwt.sign({ payload }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    user.lastLoginAt = new Date();
+    await user.save();
 
     res.status(200).json({ token });
   } catch (err) {

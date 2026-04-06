@@ -26,6 +26,8 @@ const uploadRoutes = require('./controllers/uploads');
 const cartRoutes = require('./controllers/cart');
 const orderRoutes = require('./controllers/orders');
 const careersRoutes = require('./controllers/careers');
+const staffPortalRoutes = require('./controllers/staffPortal');
+const adminPortalRoutes = require('./controllers/adminPortal');
 const app = express();
 const port = process.env.PORT || 5000;
 let mongoReady = false;
@@ -100,6 +102,8 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/careers', careersRoutes);
+app.use('/api/staff-portal', staffPortalRoutes);
+app.use('/api/admin-portal', adminPortalRoutes);
 
 if (!mongoUri) {
   console.error('Missing required environment variable: MONGO_URI or MONGODB_URI');

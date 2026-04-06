@@ -6,7 +6,10 @@ const userSchema = new mongoose.Schema({
   phone: { type: String, required: true, unique: true },
   hashedPassword: { type: String, required: true },
   name: String,
+  department: String,
   marketingOptIn: { type: Boolean, default: false },
+  isActive: { type: Boolean, default: true },
+  lastLoginAt: Date,
   address: {
     fullName: String,
     phone: String,
@@ -18,7 +21,7 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['user', 'admin'],
+    enum: ['user', 'admin', 'sales_staff'],
     default: 'user',
   },
 }, { timestamps: true });

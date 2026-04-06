@@ -2,8 +2,8 @@
 const express = require('express');
 const cloudinary = require('cloudinary');
 const multer = require('multer');
-const verifyToken = require('../middleware/verify-token');
-const isAdmin = require('../middleware/is-admin');
+const requireAuthUser = require('../middleware/require-auth-user');
+const requireRoles = require('../middleware/require-roles');
 
 const cloudinaryV2 = cloudinary.v2 || cloudinary;
 if (!cloudinary.v2) {
@@ -31,7 +31,7 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-const allowedImageExtensions = new Set([
+const allowedUploadExtensions = new Set([
   '.jpg',
   '.jpeg',
   '.png',
@@ -43,6 +43,7 @@ const allowedImageExtensions = new Set([
   '.heic',
   '.heif',
   '.jfif',
+  '.pdf',
 ]);
 
 const getFileExtension = (filename = '') => {
@@ -50,17 +51,23 @@ const getFileExtension = (filename = '') => {
   return match ? match[0] : '';
 };
 
-const isAllowedImageUpload = (file) => {
+const isImageUpload = (file) => {
+  const mime = String(file?.mimetype || '').toLowerCase();
+  const extension = getFileExtension(file?.originalname);
+  return mime.startsWith('image/') || allowedUploadExtensions.has(extension) && extension !== '.pdf';
+};
+
+const isAllowedUpload = (file) => {
   if (!file) return false;
 
   const mime = String(file.mimetype || '').toLowerCase();
-  if (mime.startsWith('image/')) return true;
+  if (mime.startsWith('image/') || mime === 'application/pdf') return true;
 
   const extension = getFileExtension(file.originalname);
-  return allowedImageExtensions.has(extension);
+  return allowedUploadExtensions.has(extension);
 };
 
-const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype) => new Promise((resolve, reject) => {
+const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype, folder = 'LTE-products') => new Promise((resolve, reject) => {
   const publicIdBase = String(originalname || 'upload')
     .replace(/\.[^.]+$/, '')
     .toLowerCase()
@@ -70,6 +77,7 @@ const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype) => new Pro
   const extension = getFileExtension(originalname);
   const normalizedMime = String(mimetype || '').toLowerCase();
   const preferredFormat = (() => {
+    if (normalizedMime === 'application/pdf' || extension === '.pdf') return 'pdf';
     if (normalizedMime === 'image/png' || extension === '.png') return 'png';
     if (normalizedMime === 'image/gif' || extension === '.gif') return 'gif';
     if (normalizedMime === 'image/svg+xml' || extension === '.svg') return 'svg';
@@ -82,8 +90,8 @@ const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype) => new Pro
 
   const uploadStream = cloudinaryV2.uploader.upload_stream(
     {
-      folder: 'LTE-products',
-      resource_type: 'image',
+      folder,
+      resource_type: preferredFormat === 'pdf' ? 'raw' : 'image',
       public_id: `${publicIdBase}-${Date.now()}`,
       overwrite: false,
       format: preferredFormat,
@@ -99,8 +107,8 @@ const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype) => new Pro
 
 const router = express.Router();
 
-// ADMIN-ONLY IMAGE UPLOAD
-router.post('/', verifyToken, isAdmin, upload.single('image'), async (req, res) => {
+// PORTAL IMAGE/DOCUMENT UPLOAD
+router.post('/', requireAuthUser, requireRoles('admin', 'sales_staff'), upload.single('image'), async (req, res) => {
   try {
     if (!cloudinaryConfigured) {
       return res.status(503).json({ message: 'Cloudinary is not configured.' });
@@ -109,14 +117,15 @@ router.post('/', verifyToken, isAdmin, upload.single('image'), async (req, res) 
       return res.status(400).json({ message: 'No image received.' });
     }
 
-    if (!isAllowedImageUpload(req.file)) {
-      return res.status(400).json({ message: 'Only image uploads are allowed.' });
+    if (!isAllowedUpload(req.file)) {
+      return res.status(400).json({ message: 'Only image or PDF uploads are allowed.' });
     }
 
     const result = await uploadBufferToCloudinary(
       req.file.buffer,
       req.file.originalname,
-      req.file.mimetype
+      req.file.mimetype,
+      isImageUpload(req.file) ? 'LTE-products' : 'LTE-documents'
     );
 
     const uploadedUrl = result?.secure_url || result?.url;

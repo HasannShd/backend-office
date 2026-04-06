@@ -1,42 +1,156 @@
-# Express JWT Auth Template
+# LTE Backend
 
-## About
+## Overview
 
-This repo is an Express JWT Auth template meant to be paired with a front-end app utilizing JWT tokens.
+This backend now serves three surfaces from the same Express + MongoDB app:
 
-## Getting started
+- public LTE website APIs
+- existing product/category/admin management APIs
+- the new internal sales operations portal APIs
 
-Fork and clone this repository to your local machine.
+The new portal is role-based:
 
-After moving into the cloned directory, run `npm i` to download the dependencies.
+- `admin`
+- `sales_staff`
 
-Create a `.env` file in the root of the project:
+Customer/public users keep the existing `user` role so the website storefront is not disrupted.
+
+## Portal API Structure
+
+Staff-facing APIs:
+
+- `/api/staff-portal/dashboard`
+- `/api/staff-portal/attendance`
+- `/api/staff-portal/schedules`
+- `/api/staff-portal/reports`
+- `/api/staff-portal/orders`
+- `/api/staff-portal/expenses`
+- `/api/staff-portal/clients`
+- `/api/staff-portal/visits`
+- `/api/staff-portal/followups`
+- `/api/staff-portal/quotations`
+- `/api/staff-portal/collections`
+- `/api/staff-portal/stock-requests`
+- `/api/staff-portal/product-demands`
+- `/api/staff-portal/issues`
+- `/api/staff-portal/notifications`
+
+Admin-facing APIs:
+
+- `/api/admin-portal/dashboard`
+- `/api/admin-portal/staff`
+- `/api/admin-portal/attendance`
+- `/api/admin-portal/schedules`
+- `/api/admin-portal/reports`
+- `/api/admin-portal/orders`
+- `/api/admin-portal/expenses`
+- `/api/admin-portal/clients`
+- `/api/admin-portal/visits`
+- `/api/admin-portal/followups`
+- `/api/admin-portal/quotations`
+- `/api/admin-portal/collections`
+- `/api/admin-portal/stock-requests`
+- `/api/admin-portal/product-demands`
+- `/api/admin-portal/issues`
+- `/api/admin-portal/notifications`
+- `/api/admin-portal/activity-logs`
+- `/api/admin-portal/exports/:resource`
+
+## Portal Data Models
+
+The portal adds these models:
+
+- `AttendanceLog`
+- `Schedule`
+- `DailyReport`
+- `SalesOrder`
+- `ExpenseRequest`
+- `ActivityLog`
+- `Client`
+- `ClientVisit`
+- `FollowUp`
+- `Quotation`
+- `CollectionLog`
+- `StockRequest`
+- `ProductDemand`
+- `IssueReport`
+- `Notification`
+
+## Environment Setup
+
+Copy `.env.example` to `.env` and fill the values:
 
 ```bash
-touch .env
+cp .env.example .env
 ```
 
-and add your MongoDB URI and a secret JWT string to it. Your MongoDB URI will look something like the first entry, but with your username and password:
+Required:
 
-```plaintext
-MONGO_URI=mongodb+srv://<username>:<password>@sei.azure.mongodb.net/myApp?retryWrites=true
-JWT_SECRET=supersecret
-CLIENT_URL=http://localhost:5173
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_USER=your-user
-SMTP_PASS=your-pass
-SMTP_FROM=office@example.com
-ORDER_NOTIFY_EMAIL=orders@example.com
-CAREERS_NOTIFY_EMAIL=careers@example.com
-TAP_SECRET_KEY=your-tap-secret
-TAP_PUBLIC_KEY=your-tap-public
+- `MONGO_URI`
+- `JWT_SECRET`
+
+Needed for email workflow:
+
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASS`
+- `SMTP_FROM`
+- `SALES_ORDER_NOTIFY_EMAIL`
+
+Needed for uploads:
+
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
+
+`MONGODB_URI` is still accepted, but `MONGO_URI` is preferred.
+
+## First Admin Setup
+
+1. Register a normal user from the frontend or directly in MongoDB.
+2. Promote that account:
+
+```bash
+node scripts/promoteAdmin.js <username>
 ```
 
-`MONGODB_URI` is also accepted for backward compatibility, but `MONGO_URI` is the primary variable the server expects.
+3. Log in at the admin portal.
 
-Start the app in your terminal with:
+## Running Locally
 
-``` sh
+```bash
+npm install
 npm run dev
 ```
+
+## Order Email Workflow
+
+Sales staff orders are saved in MongoDB first, then emailed to the company mailbox via Nodemailer.
+
+Current behavior:
+
+- save order
+- send formatted email
+- track `emailSent`, `emailSentAt`, and `emailError`
+- keep `tallySyncStatus` ready for future integration
+
+Tally is intentionally not implemented yet.
+
+## Upload Workflow
+
+`/api/upload` now supports:
+
+- admin uploads
+- sales staff uploads
+- image files
+- PDF files
+
+Current Cloudinary folders:
+
+- `LTE-products`
+- `LTE-documents`
+
+## Notes For Future Tally Integration
+
+The portal order flow already separates submission from downstream integration. When Tally work starts later, add it behind the existing sales order notification/service layer instead of embedding it directly in the controller.
