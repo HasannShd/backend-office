@@ -171,6 +171,55 @@ router.post('/attendance/check-out', async (req, res, next) => {
   }
 });
 
+router.post('/attendance/mileage', async (req, res, next) => {
+  try {
+    const { mileageWeekStart, mileageWeekEnd, note } = req.body;
+    if (
+      (mileageWeekStart === undefined || mileageWeekStart === '') &&
+      (mileageWeekEnd === undefined || mileageWeekEnd === '')
+    ) {
+      return fail(res, 'Enter week start or week end mileage.', 400);
+    }
+
+    const date = todayKey();
+    const record = (await AttendanceLog.findOne(getOwnFilter(req, { date }))) || new AttendanceLog({ user: req.user._id, date });
+
+    if (mileageWeekStart !== undefined && mileageWeekStart !== '') {
+      const value = Number(mileageWeekStart);
+      if (!Number.isNaN(value)) record.mileageWeekStart = value;
+    }
+
+    if (mileageWeekEnd !== undefined && mileageWeekEnd !== '') {
+      const value = Number(mileageWeekEnd);
+      if (!Number.isNaN(value)) record.mileageWeekEnd = value;
+    }
+
+    if (typeof note === 'string' && note.trim()) {
+      record.checkOutNote = record.checkOutNote
+        ? `${record.checkOutNote}\nMileage note: ${note.trim()}`
+        : `Mileage note: ${note.trim()}`;
+    }
+
+    await record.save();
+
+    await logActivity({
+      user: req.user,
+      action: 'mileage_updated',
+      module: 'attendance',
+      recordId: record._id,
+      metadata: {
+        date,
+        mileageWeekStart: record.mileageWeekStart,
+        mileageWeekEnd: record.mileageWeekEnd,
+      },
+    });
+
+    return ok(res, { record }, 'Weekly mileage saved.');
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.get('/schedules', async (req, res, next) => {
   try {
     const filters = getOwnFilter(req);
