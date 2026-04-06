@@ -8,6 +8,8 @@ const attendanceLogSchema = new mongoose.Schema(
     checkOutTime: Date,
     checkInNote: String,
     checkOutNote: String,
+    mileageWeekStart: Number,
+    mileageWeekEnd: Number,
     totalWorkedMinutes: { type: Number, default: 0 },
   },
   { timestamps: true }

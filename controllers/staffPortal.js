@@ -109,6 +109,14 @@ router.post('/attendance/check-in', async (req, res, next) => {
     const record = existing || new AttendanceLog({ user: req.user._id, date });
     record.checkInTime = new Date();
     record.checkInNote = req.body.note || '';
+    if (req.body.mileageWeekStart !== undefined && req.body.mileageWeekStart !== '') {
+      const mileageWeekStart = Number(req.body.mileageWeekStart);
+      if (!Number.isNaN(mileageWeekStart)) record.mileageWeekStart = mileageWeekStart;
+    }
+    if (req.body.mileageWeekEnd !== undefined && req.body.mileageWeekEnd !== '') {
+      const mileageWeekEnd = Number(req.body.mileageWeekEnd);
+      if (!Number.isNaN(mileageWeekEnd)) record.mileageWeekEnd = mileageWeekEnd;
+    }
     await record.save();
 
     await logActivity({
@@ -138,6 +146,14 @@ router.post('/attendance/check-out', async (req, res, next) => {
 
     record.checkOutTime = new Date();
     record.checkOutNote = req.body.note || '';
+    if (req.body.mileageWeekStart !== undefined && req.body.mileageWeekStart !== '') {
+      const mileageWeekStart = Number(req.body.mileageWeekStart);
+      if (!Number.isNaN(mileageWeekStart)) record.mileageWeekStart = mileageWeekStart;
+    }
+    if (req.body.mileageWeekEnd !== undefined && req.body.mileageWeekEnd !== '') {
+      const mileageWeekEnd = Number(req.body.mileageWeekEnd);
+      if (!Number.isNaN(mileageWeekEnd)) record.mileageWeekEnd = mileageWeekEnd;
+    }
     record.totalWorkedMinutes = Math.max(0, Math.round((record.checkOutTime - record.checkInTime) / 60000));
     await record.save();
 
