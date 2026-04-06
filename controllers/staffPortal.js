@@ -25,7 +25,17 @@ const { sendSalesOrderEmail, createTallyBridgePayload } = require('../services/o
 const router = express.Router();
 
 const isValidObjectId = (value) => mongoose.isValidObjectId(value);
-const todayKey = () => new Date().toISOString().slice(0, 10);
+const PORTAL_TIME_ZONE = process.env.PORTAL_TIME_ZONE || 'Asia/Baghdad';
+const todayKey = () => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: PORTAL_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+};
 const getOwnFilter = (req, extra = {}) => ({ user: req.user._id, ...extra });
 
 const toRecentActivityItem = (record, label) => ({

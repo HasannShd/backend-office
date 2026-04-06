@@ -27,7 +27,17 @@ const { toCsv } = require('../utils/csv');
 const router = express.Router();
 
 const isValidObjectId = (value) => mongoose.isValidObjectId(value);
-const todayKey = () => new Date().toISOString().slice(0, 10);
+const PORTAL_TIME_ZONE = process.env.PORTAL_TIME_ZONE || 'Asia/Baghdad';
+const todayKey = () => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: PORTAL_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+};
 
 const sendUserNotification = async ({ user, title, message, type = 'info', relatedModule, relatedRecord }) => {
   if (!user) return null;
@@ -105,6 +115,165 @@ router.get('/staff', async (req, res, next) => {
   try {
     const staff = await User.find({ role: 'sales_staff' }).select('-hashedPassword').sort({ name: 1, username: 1 });
     return ok(res, { staff });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/staff/:id/summary', async (req, res, next) => {
+  try {
+    if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid staff id.', 400);
+    const staffUser = await User.findOne({ _id: req.params.id, role: 'sales_staff' }).select('-hashedPassword');
+    if (!staffUser) return fail(res, 'Staff user not found.', 404);
+
+    const userFilter = { user: staffUser._id };
+    const today = todayKey();
+
+    const [
+      attendanceCount,
+      lastAttendance,
+      schedulesCount,
+      completedSchedules,
+      nextSchedule,
+      reportsCount,
+      lastReport,
+      ordersCount,
+      pendingOrders,
+      lastOrder,
+      expensesCount,
+      pendingExpenses,
+      lastExpense,
+      visitsCount,
+      lastVisit,
+      followUpsCount,
+      pendingFollowUps,
+      quotationsCount,
+      collectionsCount,
+      requestsCount,
+      demandsCount,
+      issuesCount,
+      unreadNotifications,
+      recentActivity,
+    ] = await Promise.all([
+      AttendanceLog.countDocuments(userFilter),
+      AttendanceLog.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
+      Schedule.countDocuments(userFilter),
+      Schedule.countDocuments({ ...userFilter, status: 'completed' }),
+      Schedule.findOne({ ...userFilter, assignedDate: { $gte: today } }).sort({ assignedDate: 1, startTime: 1 }),
+      DailyReport.countDocuments(userFilter),
+      DailyReport.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
+      SalesOrder.countDocuments(userFilter),
+      SalesOrder.countDocuments({ ...userFilter, status: { $in: ['submitted', 'reviewed', 'emailed', 'confirmed'] } }),
+      SalesOrder.findOne(userFilter).sort({ createdAt: -1 }),
+      ExpenseRequest.countDocuments(userFilter),
+      ExpenseRequest.countDocuments({ ...userFilter, status: { $in: ['submitted', 'under_review'] } }),
+      ExpenseRequest.findOne(userFilter).sort({ createdAt: -1 }),
+      ClientVisit.countDocuments(userFilter),
+      ClientVisit.findOne(userFilter).sort({ visitDate: -1, createdAt: -1 }),
+      FollowUp.countDocuments(userFilter),
+      FollowUp.countDocuments({ ...userFilter, status: 'pending' }),
+      Quotation.countDocuments(userFilter),
+      CollectionLog.countDocuments(userFilter),
+      StockRequest.countDocuments(userFilter),
+      ProductDemand.countDocuments(userFilter),
+      IssueReport.countDocuments({ ...userFilter, status: { $nin: ['resolved', 'closed'] } }),
+      Notification.countDocuments({ user: staffUser._id, read: false }),
+      ActivityLog.find({ user: staffUser._id }).sort({ createdAt: -1 }).limit(12),
+    ]);
+
+    return ok(res, {
+      staff: staffUser,
+      today,
+      metrics: {
+        attendanceCount,
+        schedulesCount,
+        completedSchedules,
+        reportsCount,
+        ordersCount,
+        pendingOrders,
+        expensesCount,
+        pendingExpenses,
+        visitsCount,
+        followUpsCount,
+        pendingFollowUps,
+        quotationsCount,
+        collectionsCount,
+        requestsCount,
+        demandsCount,
+        issuesCount,
+        unreadNotifications,
+      },
+      latest: {
+        attendance: lastAttendance,
+        nextSchedule,
+        report: lastReport,
+        order: lastOrder,
+        expense: lastExpense,
+        visit: lastVisit,
+      },
+      recentActivity,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/staff/:id/report', async (req, res, next) => {
+  try {
+    if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid staff id.', 400);
+    const staffUser = await User.findOne({ _id: req.params.id, role: 'sales_staff' }).select('-hashedPassword');
+    if (!staffUser) return fail(res, 'Staff user not found.', 404);
+
+    const userFilter = { user: staffUser._id };
+
+    const [
+      attendanceCount,
+      schedulesCount,
+      reportsCount,
+      ordersCount,
+      expensesCount,
+      visitsCount,
+      pendingFollowUps,
+      quotationsCount,
+      collectionsCount,
+      requestsCount,
+      demandsCount,
+      openIssues,
+    ] = await Promise.all([
+      AttendanceLog.countDocuments(userFilter),
+      Schedule.countDocuments(userFilter),
+      DailyReport.countDocuments(userFilter),
+      SalesOrder.countDocuments(userFilter),
+      ExpenseRequest.countDocuments(userFilter),
+      ClientVisit.countDocuments(userFilter),
+      FollowUp.countDocuments({ ...userFilter, status: 'pending' }),
+      Quotation.countDocuments(userFilter),
+      CollectionLog.countDocuments(userFilter),
+      StockRequest.countDocuments(userFilter),
+      ProductDemand.countDocuments(userFilter),
+      IssueReport.countDocuments({ ...userFilter, status: { $nin: ['resolved', 'closed'] } }),
+    ]);
+
+    return exportCsv(res, `staff-report-${staffUser.username || staffUser._id}.csv`, [
+      { field: 'Name', value: staffUser.name || '-' },
+      { field: 'Username', value: staffUser.username || '-' },
+      { field: 'Email', value: staffUser.email || '-' },
+      { field: 'Phone', value: staffUser.phone || '-' },
+      { field: 'Department', value: staffUser.department || '-' },
+      { field: 'Active', value: staffUser.isActive ? 'Yes' : 'No' },
+      { field: 'Attendance Entries', value: attendanceCount },
+      { field: 'Schedules', value: schedulesCount },
+      { field: 'Reports', value: reportsCount },
+      { field: 'Orders', value: ordersCount },
+      { field: 'Expenses', value: expensesCount },
+      { field: 'Visits', value: visitsCount },
+      { field: 'Pending Follow-ups', value: pendingFollowUps },
+      { field: 'Quotations', value: quotationsCount },
+      { field: 'Collections', value: collectionsCount },
+      { field: 'Requests', value: requestsCount },
+      { field: 'Demand Logs', value: demandsCount },
+      { field: 'Open Issues', value: openIssues },
+    ]);
   } catch (error) {
     return next(error);
   }
