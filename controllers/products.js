@@ -8,6 +8,31 @@ const ExcelJS = require('exceljs');
 
 const router = express.Router();
 
+const collectDescendantCategoryIds = async (categoryId) => {
+  const rootId = String(categoryId);
+  const allCategories = await Category.find({})
+    .select('_id parent')
+    .lean();
+
+  const descendants = new Set([rootId]);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    allCategories.forEach((category) => {
+      if (!category.parent) return;
+      const parentId = String(category.parent);
+      const currentId = String(category._id);
+      if (descendants.has(parentId) && !descendants.has(currentId)) {
+        descendants.add(currentId);
+        changed = true;
+      }
+    });
+  }
+
+  return Array.from(descendants);
+};
+
 // ---------- PUBLIC ROUTES ----------
 
 // Get all products (with optional filters)
@@ -18,13 +43,15 @@ router.get('/', async (req, res) => {
 
     if (category) {
       if (mongoose.isValidObjectId(category)) {
-        filter.categorySlug = category;
+        const categoryIds = await collectDescendantCategoryIds(category);
+        filter.categorySlug = { $in: categoryIds };
       } else {
         const categoryDoc = await Category.findOne({ slug: category }).select('_id');
         if (!categoryDoc) {
           return res.json({ items: [], total: 0 });
         }
-        filter.categorySlug = categoryDoc._id;
+        const categoryIds = await collectDescendantCategoryIds(categoryDoc._id);
+        filter.categorySlug = { $in: categoryIds };
       }
     }
     if (search) filter.name = { $regex: search, $options: 'i' };
@@ -33,7 +60,11 @@ router.get('/', async (req, res) => {
     const skip = (Number(page) - 1) * Number(limit);
     const products = await Product.find(filter)
       .select('name brand image images basePrice variants.price variants.type variants.sku variants.name variants.image categorySlug featured')
-      .populate('categorySlug', 'name slug')
+      .populate({
+        path: 'categorySlug',
+        select: 'name slug parent',
+        populate: { path: 'parent', select: 'name slug' },
+      })
       .skip(skip)
       .limit(Number(limit))
       .lean();
@@ -54,7 +85,12 @@ router.get('/admin/all', verifyToken, isAdmin, async (req, res) => {
     const { search } = req.query;
     const filter = {};
     if (search) filter.name = { $regex: search, $options: 'i' };
-    const products = await Product.find(filter).populate('categorySlug').lean();
+    const products = await Product.find(filter)
+      .populate({
+        path: 'categorySlug',
+        populate: { path: 'parent', select: 'name slug' },
+      })
+      .lean();
     res.json(products);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -65,12 +101,17 @@ router.get('/admin/all', verifyToken, isAdmin, async (req, res) => {
 router.get('/admin/export', verifyToken, isAdmin, async (req, res) => {
   try {
     const products = await Product.find({})
-      .populate('categorySlug', 'name slug')
+      .populate({
+        path: 'categorySlug',
+        select: 'name slug parent',
+        populate: { path: 'parent', select: 'name slug' },
+      })
       .sort('name')
       .lean();
     const categories = await Category.find({})
-      .select('name slug')
-      .sort('name')
+      .select('name slug parent sortOrder')
+      .populate('parent', 'name slug')
+      .sort({ sortOrder: 1, name: 1 })
       .lean();
 
     const workbook = new ExcelJS.Workbook();
@@ -79,6 +120,7 @@ router.get('/admin/export', verifyToken, isAdmin, async (req, res) => {
 
     productSheet.columns = [
       { header: 'Category', key: 'category', width: 32 },
+      { header: 'ParentCategory', key: 'parentCategory', width: 32 },
       { header: 'Product', key: 'product', width: 44 },
       { header: 'Brand', key: 'brand', width: 24 },
       { header: 'Image', key: 'image', width: 32 },
@@ -88,6 +130,7 @@ router.get('/admin/export', verifyToken, isAdmin, async (req, res) => {
     ];
     productSheet.addRows(products.map(product => ({
       category: product.categorySlug?.name || '',
+      parentCategory: product.categorySlug?.parent?.name || '',
       product: product.name || '',
       brand: product.brand || '',
       image: product.image || '',
@@ -98,10 +141,12 @@ router.get('/admin/export', verifyToken, isAdmin, async (req, res) => {
 
     categorySheet.columns = [
       { header: 'Category', key: 'category', width: 32 },
+      { header: 'ParentCategory', key: 'parentCategory', width: 32 },
       { header: 'CategorySlug', key: 'categorySlug', width: 32 },
     ];
     categorySheet.addRows(categories.map(category => ({
       category: category.name || '',
+      parentCategory: category.parent?.name || '',
       categorySlug: category.slug || '',
     })));
 
@@ -194,7 +239,12 @@ router.get('/:id', async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid product id' });
     }
-    const product = await Product.findById(req.params.id).populate('categorySlug').lean();
+    const product = await Product.findById(req.params.id)
+      .populate({
+        path: 'categorySlug',
+        populate: { path: 'parent', select: 'name slug' },
+      })
+      .lean();
     if (!product) return res.status(404).json({ message: 'Not found' });
     res.json(product);
   } catch (err) {
