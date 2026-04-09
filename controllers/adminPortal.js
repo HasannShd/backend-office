@@ -51,6 +51,20 @@ const sendUserNotification = async ({ user, title, message, type = 'info', relat
   });
 };
 
+const formatDateTime = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: PORTAL_TIME_ZONE,
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+};
+
 const applyAdminFilters = (req, base = {}) => {
   const filters = { ...base };
   if (req.query.user && isValidObjectId(req.query.user)) filters.user = req.query.user;
@@ -228,11 +242,17 @@ router.get('/staff/:id/report', async (req, res, next) => {
 
     const [
       attendanceCount,
+      lastAttendance,
       schedulesCount,
+      nextSchedule,
       reportsCount,
+      lastReport,
       ordersCount,
+      lastOrder,
       expensesCount,
+      lastExpense,
       visitsCount,
+      lastVisit,
       pendingFollowUps,
       quotationsCount,
       collectionsCount,
@@ -241,11 +261,17 @@ router.get('/staff/:id/report', async (req, res, next) => {
       openIssues,
     ] = await Promise.all([
       AttendanceLog.countDocuments(userFilter),
+      AttendanceLog.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
       Schedule.countDocuments(userFilter),
+      Schedule.findOne(userFilter).sort({ assignedDate: -1, startTime: -1 }),
       DailyReport.countDocuments(userFilter),
+      DailyReport.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
       SalesOrder.countDocuments(userFilter),
+      SalesOrder.findOne(userFilter).sort({ createdAt: -1 }),
       ExpenseRequest.countDocuments(userFilter),
+      ExpenseRequest.findOne(userFilter).sort({ createdAt: -1 }),
       ClientVisit.countDocuments(userFilter),
+      ClientVisit.findOne(userFilter).sort({ visitDate: -1, createdAt: -1 }),
       FollowUp.countDocuments({ ...userFilter, status: 'pending' }),
       Quotation.countDocuments(userFilter),
       CollectionLog.countDocuments(userFilter),
@@ -262,11 +288,24 @@ router.get('/staff/:id/report', async (req, res, next) => {
       { field: 'Department', value: staffUser.department || '-' },
       { field: 'Active', value: staffUser.isActive ? 'Yes' : 'No' },
       { field: 'Attendance Entries', value: attendanceCount },
+      { field: 'Last Attendance Date', value: lastAttendance?.date || '-' },
+      { field: 'Last Check In', value: formatDateTime(lastAttendance?.checkInTime) },
+      { field: 'Last Check Out', value: formatDateTime(lastAttendance?.checkOutTime) },
       { field: 'Schedules', value: schedulesCount },
+      { field: 'Latest Schedule', value: nextSchedule?.title || '-' },
+      { field: 'Latest Schedule Date', value: nextSchedule?.assignedDate || '-' },
       { field: 'Reports', value: reportsCount },
+      { field: 'Latest Report', value: lastReport?.summary || '-' },
+      { field: 'Latest Report Date', value: lastReport?.date || '-' },
       { field: 'Orders', value: ordersCount },
+      { field: 'Latest Order', value: lastOrder?.customerName || lastOrder?.companyName || '-' },
+      { field: 'Latest Order Submitted', value: formatDateTime(lastOrder?.createdAt) },
       { field: 'Expenses', value: expensesCount },
+      { field: 'Latest Expense', value: lastExpense?.title || '-' },
+      { field: 'Latest Expense Submitted', value: formatDateTime(lastExpense?.createdAt) },
       { field: 'Visits', value: visitsCount },
+      { field: 'Latest Visit', value: lastVisit?.purpose || lastVisit?.clientLabel || '-' },
+      { field: 'Latest Visit Date', value: lastVisit?.visitDate || '-' },
       { field: 'Pending Follow-ups', value: pendingFollowUps },
       { field: 'Quotations', value: quotationsCount },
       { field: 'Collections', value: collectionsCount },
