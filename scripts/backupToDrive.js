@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { MongoClient, EJSON } = require('mongodb');
+const { MongoClient } = require('mongodb');
 const { google } = require('googleapis');
 const tar = require('tar');
 
@@ -49,6 +49,67 @@ const formatTimestamp = () => {
   return `${dateStamp}-${timeStamp}`;
 };
 
+const toExtendedJson = (value) => {
+  if (value === null || value === undefined) return value;
+
+  if (value instanceof Date) {
+    return { $date: value.toISOString() };
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return { $binary: { base64: value.toString('base64'), subType: '00' } };
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => toExtendedJson(entry));
+  }
+
+  if (typeof value === 'object') {
+    if (value._bsontype) {
+      switch (value._bsontype) {
+        case 'ObjectId':
+          return { $oid: value.toString() };
+        case 'Decimal128':
+          return { $numberDecimal: value.toString() };
+        case 'Long':
+          return { $numberLong: value.toString() };
+        case 'Int32':
+          return { $numberInt: value.toString() };
+        case 'Double':
+          return { $numberDouble: value.toString() };
+        case 'Binary': {
+          const base64 = value.buffer ? value.buffer.toString('base64') : Buffer.from(value.value()).toString('base64');
+          const subType = value.sub_type ?? value.subType ?? 0;
+          return { $binary: { base64, subType: subType.toString(16).padStart(2, '0') } };
+        }
+        case 'Timestamp': {
+          const t = typeof value.getHighBits === 'function' ? value.getHighBits() : value.t ?? 0;
+          const i = typeof value.getLowBits === 'function' ? value.getLowBits() : value.i ?? 0;
+          return { $timestamp: { t, i } };
+        }
+        case 'MinKey':
+          return { $minKey: 1 };
+        case 'MaxKey':
+          return { $maxKey: 1 };
+        case 'RegExp':
+          return { $regularExpression: { pattern: value.pattern, options: value.options || '' } };
+        default:
+          return String(value);
+      }
+    }
+
+    const output = {};
+    for (const [key, entry] of Object.entries(value)) {
+      output[key] = toExtendedJson(entry);
+    }
+    return output;
+  }
+
+  return value;
+};
+
+const stringifyDoc = (doc) => JSON.stringify(toExtendedJson(doc));
+
 const exportCollections = async (db, outputDir) => {
   const collections = await db.collections();
   const summary = [];
@@ -61,8 +122,12 @@ const exportCollections = async (db, outputDir) => {
 
     const cursor = collection.find({});
     for await (const doc of cursor) {
-      stream.write(`${EJSON.stringify(doc)}\n`);
-      count += 1;
+      try {
+        stream.write(`${stringifyDoc(doc)}\n`);
+        count += 1;
+      } catch (err) {
+        console.warn(`[backup] Skipping document in ${name}:`, err.message);
+      }
     }
 
     await new Promise((resolve, reject) => {
