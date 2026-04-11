@@ -1,8 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { MongoClient } = require('mongodb');
-const { EJSON } = require('bson');
+const { MongoClient, EJSON } = require('mongodb');
 const { google } = require('googleapis');
 const tar = require('tar');
 
