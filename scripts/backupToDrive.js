@@ -12,6 +12,15 @@ const ensureEnv = () => {
   if (missing.length) {
     throw new Error(`Missing required env: ${missing.join(', ')}`);
   }
+  const hasOauth = Boolean(
+    process.env.GDRIVE_OAUTH_CLIENT_ID &&
+    process.env.GDRIVE_OAUTH_CLIENT_SECRET &&
+    process.env.GDRIVE_OAUTH_REFRESH_TOKEN
+  );
+  const hasServiceAccount = Boolean(process.env.GDRIVE_SERVICE_ACCOUNT_JSON);
+  if (!hasOauth && !hasServiceAccount) {
+    throw new Error('Missing Google Drive credentials. Set OAuth secrets or GDRIVE_SERVICE_ACCOUNT_JSON.');
+  }
 };
 
 const getDriveAuth = () => {
