@@ -151,6 +151,21 @@ Current Cloudinary folders:
 - `LTE-products`
 - `LTE-documents`
 
+## Backups (Google Drive via GitHub Actions)
+
+This repo includes a nightly backup workflow that exports every MongoDB collection to JSONL,
+bundles it into a `.tgz`, and uploads it to Google Drive.
+
+Required GitHub Secrets (repo Settings → Secrets and variables → Actions):
+- `MONGO_URI`
+- `GDRIVE_FOLDER_ID`
+- `GDRIVE_SERVICE_ACCOUNT_JSON` (service account JSON, or base64 of it)
+
+The schedule is set to 11:00 PM Bahrain time (20:00 UTC).
+
+Manual run:
+- GitHub → Actions → "Nightly MongoDB Backup to Google Drive" → Run workflow
+
 ## Notes For Future Tally Integration
 
 The portal order flow already separates submission from downstream integration. When Tally work starts later, add it behind the existing sales order notification/service layer instead of embedding it directly in the controller.

@@ -9,7 +9,8 @@
     "dev": "nodemon server.js",
     "migrate:categories": "node scripts/migrateCategoryHierarchy.js",
     "fix:product-spelling": "node scripts/fixProductSpelling.js",
-    "fill:category-descriptions": "node scripts/fillCategoryDescriptions.js"
+    "fill:category-descriptions": "node scripts/fillCategoryDescriptions.js",
+    "backup:drive": "node scripts/backupToDrive.js"
   },
   "keywords": [],
   "author": "",
@@ -31,7 +32,9 @@
     "multer": "^2.0.2",
     "multer-storage-cloudinary": "^2.2.1",
     "nodemailer": "^8.0.4",
-    "pdfkit": "^0.15.0"
+    "pdfkit": "^0.15.0",
+    "googleapis": "^140.0.1",
+    "tar": "^7.4.3"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"
