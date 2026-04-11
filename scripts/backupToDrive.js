@@ -5,7 +5,7 @@ const { MongoClient } = require('mongodb');
 const { google } = require('googleapis');
 const tar = require('tar');
 
-const requiredEnv = ['MONGO_URI', 'GDRIVE_FOLDER_ID', 'GDRIVE_SERVICE_ACCOUNT_JSON'];
+const requiredEnv = ['MONGO_URI', 'GDRIVE_FOLDER_ID'];
 
 const ensureEnv = () => {
   const missing = requiredEnv.filter((key) => !process.env[key]);
@@ -14,19 +14,33 @@ const ensureEnv = () => {
   }
 };
 
-const parseServiceAccount = () => {
+const getDriveAuth = () => {
+  const oauthClientId = process.env.GDRIVE_OAUTH_CLIENT_ID || '';
+  const oauthClientSecret = process.env.GDRIVE_OAUTH_CLIENT_SECRET || '';
+  const oauthRefreshToken = process.env.GDRIVE_OAUTH_REFRESH_TOKEN || '';
+
+  if (oauthClientId && oauthClientSecret && oauthRefreshToken) {
+    const oauth = new google.auth.OAuth2(oauthClientId, oauthClientSecret);
+    oauth.setCredentials({ refresh_token: oauthRefreshToken });
+    return oauth;
+  }
+
   const raw = process.env.GDRIVE_SERVICE_ACCOUNT_JSON || '';
   const trimmed = raw.trim();
   if (!trimmed) {
-    throw new Error('GDRIVE_SERVICE_ACCOUNT_JSON is empty');
+    throw new Error('Provide OAuth credentials or GDRIVE_SERVICE_ACCOUNT_JSON.');
   }
   try {
     const json = trimmed.startsWith('{')
       ? trimmed
       : Buffer.from(trimmed, 'base64').toString('utf8');
-    return JSON.parse(json);
+    const credentials = JSON.parse(json);
+    return new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/drive.file'],
+    });
   } catch (err) {
-    throw new Error('Failed to parse GDRIVE_SERVICE_ACCOUNT_JSON');
+    throw new Error('Failed to parse Google Drive credentials.');
   }
 };
 
@@ -142,11 +156,7 @@ const exportCollections = async (db, outputDir) => {
 };
 
 const uploadToDrive = async (archivePath, folderId) => {
-  const credentials = parseServiceAccount();
-  const auth = new google.auth.GoogleAuth({
-    credentials,
-    scopes: ['https://www.googleapis.com/auth/drive.file'],
-  });
+  const auth = getDriveAuth();
   const drive = google.drive({ version: 'v3', auth });
 
   const response = await drive.files.create({

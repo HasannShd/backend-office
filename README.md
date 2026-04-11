@@ -159,7 +159,14 @@ bundles it into a `.tgz`, and uploads it to Google Drive.
 Required GitHub Secrets (repo Settings → Secrets and variables → Actions):
 - `MONGO_URI`
 - `GDRIVE_FOLDER_ID`
-- `GDRIVE_SERVICE_ACCOUNT_JSON` (service account JSON, or base64 of it)
+
+Use one of these credential methods:
+- OAuth (recommended for personal Drive):
+  - `GDRIVE_OAUTH_CLIENT_ID`
+  - `GDRIVE_OAUTH_CLIENT_SECRET`
+  - `GDRIVE_OAUTH_REFRESH_TOKEN`
+- Service Account (requires Shared Drive):
+  - `GDRIVE_SERVICE_ACCOUNT_JSON` (service account JSON, or base64 of it)
 
 The schedule is set to 11:00 PM Bahrain time (20:00 UTC).
 
