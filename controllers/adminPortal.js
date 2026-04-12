@@ -689,6 +689,12 @@ router.get('/exports/:resource', async (req, res, next) => {
     const handler = exporters[req.params.resource];
     if (!handler) return fail(res, 'Unsupported export resource.', 404);
     const rows = await handler();
+    await logActivity({
+      user: req.user,
+      action: 'admin_export_downloaded',
+      module: 'export',
+      metadata: { resource: req.params.resource, count: rows.length },
+    });
     return exportCsv(res, `${req.params.resource}.csv`, rows);
   } catch (error) {
     return next(error);

@@ -4,6 +4,7 @@ const cloudinary = require('cloudinary');
 const multer = require('multer');
 const requireAuthUser = require('../middleware/require-auth-user');
 const requireRoles = require('../middleware/require-roles');
+const { logActivity } = require('../services/activity-log-service');
 
 const cloudinaryV2 = cloudinary.v2 || cloudinary;
 if (!cloudinary.v2) {
@@ -132,6 +133,18 @@ router.post('/', requireAuthUser, requireRoles('admin', 'sales_staff'), upload.s
     if (!uploadedUrl) {
       return res.status(502).json({ message: 'Upload provider did not return a URL.' });
     }
+
+    await logActivity({
+      user: req.user,
+      action: 'file_uploaded',
+      module: 'upload',
+      metadata: {
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        bytes: req.file.size,
+        folder: isImageUpload(req.file) ? 'LTE-products' : 'LTE-documents',
+      },
+    });
 
     return res.status(201).json({ url: uploadedUrl });
   } catch (err) {

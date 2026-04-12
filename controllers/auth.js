@@ -413,6 +413,14 @@ router.get('/admin/mfa/status', verifyToken, async (req, res) => {
     return res.json({
       mfaEnabled: Boolean(user.mfaEnabled && user.mfaSecretEncrypted),
       backupCodesRemaining: (user.mfaRecoveryCodeHashes || []).length,
+      passwordChangedAt: user.passwordChangedAt || null,
+      lastLoginAt: user.lastLoginAt || null,
+      smtpConfigured: Boolean(isMailerConfigured),
+      adminSessionTtl: TOKEN_TTLS.admin,
+      recommendedActions: [
+        !user.mfaEnabled ? 'Enable MFA for this admin account.' : null,
+        !isMailerConfigured ? 'Configure SMTP so password reset works securely.' : null,
+      ].filter(Boolean),
     });
   } catch (err) {
     return res.status(500).json({ err: err.message });

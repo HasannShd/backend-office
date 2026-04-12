@@ -7,6 +7,7 @@ const verifyToken = require('../middleware/verify-token');
 const isAdmin = require('../middleware/is-admin');
 const { sendMail } = require('../utils/mailer');
 const { buildInvoicePdf } = require('../utils/invoice');
+const { logActivity } = require('../services/activity-log-service');
 
 const router = express.Router();
 
@@ -105,6 +106,14 @@ router.post('/checkout', verifyToken, async (req, res) => {
 
     await sendOrderEmail(order);
 
+    await logActivity({
+      user: req.user,
+      action: 'website_order_created',
+      module: 'order',
+      recordId: order._id,
+      metadata: { invoiceNumber: order.invoiceNumber, total: order.total },
+    });
+
     res.status(201).json(order);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -176,6 +185,15 @@ router.get('/:id/invoice', verifyToken, async (req, res) => {
     if (order.user.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Not authorized' });
     }
+
+    const actor = req.user.role ? req.user : await User.findById(req.user._id);
+    await logActivity({
+      user: actor,
+      action: 'invoice_downloaded',
+      module: 'order',
+      recordId: order._id,
+      metadata: { invoiceNumber: order.invoiceNumber, actorRole: req.user.role },
+    });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="invoice-${order.invoiceNumber}.pdf"`);

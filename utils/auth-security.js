@@ -15,13 +15,13 @@ const COOKIE_NAMES = {
 const TOKEN_TTLS = {
   user: '3d',
   sales_staff: '1d',
-  admin: '12h',
+  admin: '8h',
 };
 
 const COOKIE_MAX_AGE_MS = {
   user: 3 * 24 * 60 * 60 * 1000,
   sales_staff: 24 * 60 * 60 * 1000,
-  admin: 12 * 60 * 60 * 1000,
+  admin: 8 * 60 * 60 * 1000,
 };
 
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;

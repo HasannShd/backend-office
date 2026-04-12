@@ -352,6 +352,13 @@ router.get('/orders/export', async (req, res, next) => {
       .populate('client', 'name contactPerson phone email location')
       .lean();
 
+    await logActivity({
+      user: req.user,
+      action: 'orders_exported',
+      module: 'sales_order',
+      metadata: { count: orders.length },
+    });
+
     return exportCsv(
       res,
       `staff-orders-${req.user.username || req.user._id}.csv`,
@@ -386,6 +393,12 @@ router.get('/clients', async (req, res, next) => {
 router.get('/clients/export', async (req, res, next) => {
   try {
     const clients = await Client.find(getOwnedClientFilter(req.user._id)).sort({ updatedAt: -1 }).lean();
+    await logActivity({
+      user: req.user,
+      action: 'clients_exported',
+      module: 'client',
+      metadata: { count: clients.length },
+    });
     return exportCsv(
       res,
       `staff-clients-${req.user.username || req.user._id}.csv`,

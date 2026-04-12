@@ -94,8 +94,26 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const exportLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 25,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter);
+app.use('/api/upload', uploadLimiter);
+app.use('/api/admin-portal/exports', exportLimiter);
+app.use('/api/staff-portal/orders/export', exportLimiter);
+app.use('/api/staff-portal/clients/export', exportLimiter);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Server is running', mongoReady });
