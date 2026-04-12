@@ -631,6 +631,12 @@ router.get('/exports/:resource', async (req, res, next) => {
             checkInTime: row.checkInTime?.toISOString?.() || '',
             checkOutTime: row.checkOutTime?.toISOString?.() || '',
             totalWorkedMinutes: row.totalWorkedMinutes || 0,
+            mileageWeekStart: row.mileageWeekStart ?? '',
+            mileageWeekStartAt: row.mileageWeekStartAt?.toISOString?.() || '',
+            mileageWeekEnd: row.mileageWeekEnd ?? '',
+            mileageWeekEndAt: row.mileageWeekEndAt?.toISOString?.() || '',
+            checkInNote: row.checkInNote || '',
+            checkOutNote: row.checkOutNote || '',
           }))
         ),
       reports: async () =>
