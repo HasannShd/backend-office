@@ -1,5 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const ExcelJS = require('exceljs');
 
 const User = require('../models/user');
 const AttendanceLog = require('../models/attendanceLog');
@@ -55,6 +56,114 @@ const formatDateTime = (value) => {
     hour: 'numeric',
     minute: '2-digit',
   }).format(date);
+};
+
+const formatDateOnly = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: PORTAL_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+};
+
+const trimText = (value) => String(value || '').trim();
+const csvCell = (value) => trimText(value).replace(/\s+/g, ' ');
+
+const matchesDateFilter = (value, targetDate) => {
+  if (!targetDate) return true;
+  if (!value) return false;
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value === targetDate;
+  return formatDateOnly(value) === targetDate;
+};
+
+const autoFitWorksheet = (worksheet) => {
+  worksheet.columns.forEach((column) => {
+    let maxLength = 12;
+    column.eachCell({ includeEmpty: true }, (cell) => {
+      const length = String(cell.value ?? '').length;
+      if (length > maxLength) maxLength = Math.min(length + 2, 40);
+    });
+    column.width = maxLength;
+  });
+};
+
+const buildStaffReportData = async (staffUser, selectedDate) => {
+  const userFilter = { user: staffUser._id };
+  const clientFilter = { $or: [{ assignedTo: staffUser._id }, { createdBy: staffUser._id }] };
+
+  const [
+    attendanceCount,
+    reportsCount,
+    ordersCount,
+    pendingOrders,
+    visitsCount,
+    clientsCount,
+    unreadNotifications,
+    attendanceEntries,
+    reportEntries,
+    orderEntries,
+    visitEntries,
+    clientEntries,
+    activityEntries,
+  ] = await Promise.all([
+    AttendanceLog.countDocuments(userFilter),
+    DailyReport.countDocuments(userFilter),
+    SalesOrder.countDocuments(userFilter),
+    SalesOrder.countDocuments({ ...userFilter, status: { $in: ['submitted', 'reviewed', 'emailed', 'confirmed'] } }),
+    ClientVisit.countDocuments(userFilter),
+    Client.countDocuments(clientFilter),
+    Notification.countDocuments({ user: staffUser._id, read: false }),
+    AttendanceLog.find(userFilter).sort({ date: -1, createdAt: -1 }).limit(90).lean(),
+    DailyReport.find(userFilter).sort({ date: -1, createdAt: -1 }).limit(90).lean(),
+    SalesOrder.find(userFilter).sort({ createdAt: -1 }).limit(90).populate('client', 'name contactPerson phone location').lean(),
+    ClientVisit.find(userFilter).sort({ visitDate: -1, createdAt: -1 }).limit(90).populate('client', 'name contactPerson phone location').lean(),
+    Client.find(clientFilter).sort({ updatedAt: -1, createdAt: -1 }).limit(120).lean(),
+    ActivityLog.find({ user: staffUser._id }).sort({ createdAt: -1 }).limit(90).lean(),
+  ]);
+
+  const attendance = attendanceEntries.filter((entry) => matchesDateFilter(entry.date, selectedDate));
+  const reports = reportEntries.filter((entry) => matchesDateFilter(entry.date, selectedDate));
+  const orders = orderEntries.filter((entry) => matchesDateFilter(entry.submittedAt || entry.createdAt, selectedDate));
+  const visits = visitEntries.filter((entry) => matchesDateFilter(entry.visitDate, selectedDate));
+  const clients = clientEntries.filter((entry) => matchesDateFilter(entry.createdAt, selectedDate));
+  const activity = activityEntries.filter((entry) => matchesDateFilter(entry.createdAt, selectedDate));
+
+  return {
+    metrics: {
+      attendanceCount,
+      reportsCount,
+      ordersCount,
+      pendingOrders,
+      visitsCount,
+      clientsCount,
+      unreadNotifications,
+      filteredAttendanceCount: attendance.length,
+      filteredReportsCount: reports.length,
+      filteredOrdersCount: orders.length,
+      filteredVisitsCount: visits.length,
+      filteredClientsCount: clients.length,
+    },
+    latest: {
+      attendance: attendanceEntries[0] || null,
+      report: reportEntries[0] || null,
+      order: orderEntries[0] || null,
+      visit: visitEntries[0] || null,
+      client: clientEntries[0] || null,
+    },
+    records: {
+      attendance,
+      reports,
+      orders,
+      visits,
+      clients,
+      activity,
+    },
+    recentActivity: activity,
+  };
 };
 
 const applyAdminFilters = (req, base = {}) => {
@@ -125,57 +234,17 @@ router.get('/staff/:id/summary', async (req, res, next) => {
     if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid staff id.', 400);
     const staffUser = await User.findOne({ _id: req.params.id, role: 'sales_staff' }).select('-hashedPassword');
     if (!staffUser) return fail(res, 'Staff user not found.', 404);
-
-    const userFilter = { user: staffUser._id };
-    const today = todayKey();
-
-    const [
-      attendanceCount,
-      lastAttendance,
-      reportsCount,
-      lastReport,
-      ordersCount,
-      pendingOrders,
-      lastOrder,
-      visitsCount,
-      lastVisit,
-      clientsCount,
-      unreadNotifications,
-      recentActivity,
-    ] = await Promise.all([
-      AttendanceLog.countDocuments(userFilter),
-      AttendanceLog.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
-      DailyReport.countDocuments(userFilter),
-      DailyReport.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
-      SalesOrder.countDocuments(userFilter),
-      SalesOrder.countDocuments({ ...userFilter, status: { $in: ['submitted', 'reviewed', 'emailed', 'confirmed'] } }),
-      SalesOrder.findOne(userFilter).sort({ createdAt: -1 }),
-      ClientVisit.countDocuments(userFilter),
-      ClientVisit.findOne(userFilter).sort({ visitDate: -1, createdAt: -1 }),
-      Client.countDocuments({ assignedTo: staffUser._id }),
-      Notification.countDocuments({ user: staffUser._id, read: false }),
-      ActivityLog.find({ user: staffUser._id }).sort({ createdAt: -1 }).limit(12),
-    ]);
+    const selectedDate = trimText(req.query.date);
+    const reportData = await buildStaffReportData(staffUser, selectedDate);
 
     return ok(res, {
       staff: staffUser,
-      today,
-      metrics: {
-        attendanceCount,
-        reportsCount,
-        ordersCount,
-        pendingOrders,
-        visitsCount,
-        clientsCount,
-        unreadNotifications,
-      },
-      latest: {
-        attendance: lastAttendance,
-        report: lastReport,
-        order: lastOrder,
-        visit: lastVisit,
-      },
-      recentActivity,
+      today: todayKey(),
+      filters: { date: selectedDate || '' },
+      metrics: reportData.metrics,
+      latest: reportData.latest,
+      records: reportData.records,
+      recentActivity: reportData.recentActivity,
     });
   } catch (error) {
     return next(error);
@@ -187,53 +256,203 @@ router.get('/staff/:id/report', async (req, res, next) => {
     if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid staff id.', 400);
     const staffUser = await User.findOne({ _id: req.params.id, role: 'sales_staff' }).select('-hashedPassword');
     if (!staffUser) return fail(res, 'Staff user not found.', 404);
+    const selectedDate = trimText(req.query.date);
+    const reportData = await buildStaffReportData(staffUser, selectedDate);
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'LTE Admin Portal';
+    workbook.created = new Date();
 
-    const userFilter = { user: staffUser._id };
-
-    const [
-      attendanceCount,
-      lastAttendance,
-      reportsCount,
-      lastReport,
-      ordersCount,
-      lastOrder,
-      visitsCount,
-      lastVisit,
-      clientsCount,
-    ] = await Promise.all([
-      AttendanceLog.countDocuments(userFilter),
-      AttendanceLog.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
-      DailyReport.countDocuments(userFilter),
-      DailyReport.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
-      SalesOrder.countDocuments(userFilter),
-      SalesOrder.findOne(userFilter).sort({ createdAt: -1 }),
-      ClientVisit.countDocuments(userFilter),
-      ClientVisit.findOne(userFilter).sort({ visitDate: -1, createdAt: -1 }),
-      Client.countDocuments({ assignedTo: staffUser._id }),
+    const summarySheet = workbook.addWorksheet('Summary');
+    summarySheet.columns = [
+      { header: 'Section', key: 'section', width: 24 },
+      { header: 'Value', key: 'value', width: 40 },
+    ];
+    summarySheet.addRows([
+      { section: 'Name', value: staffUser.name || '-' },
+      { section: 'Username', value: staffUser.username || '-' },
+      { section: 'Email', value: staffUser.email || '-' },
+      { section: 'Phone', value: staffUser.phone || '-' },
+      { section: 'Department', value: staffUser.department || '-' },
+      { section: 'Active', value: staffUser.isActive ? 'Yes' : 'No' },
+      { section: 'Date Filter', value: selectedDate || 'All dates' },
+      { section: 'Attendance Entries', value: reportData.metrics.attendanceCount },
+      { section: 'Reports', value: reportData.metrics.reportsCount },
+      { section: 'Orders', value: reportData.metrics.ordersCount },
+      { section: 'Pending Orders', value: reportData.metrics.pendingOrders },
+      { section: 'Visits', value: reportData.metrics.visitsCount },
+      { section: 'Clients', value: reportData.metrics.clientsCount },
+      { section: 'Unread Notifications', value: reportData.metrics.unreadNotifications },
+      { section: 'Filtered Attendance', value: reportData.metrics.filteredAttendanceCount },
+      { section: 'Filtered Reports', value: reportData.metrics.filteredReportsCount },
+      { section: 'Filtered Orders', value: reportData.metrics.filteredOrdersCount },
+      { section: 'Filtered Visits', value: reportData.metrics.filteredVisitsCount },
+      { section: 'Filtered Clients', value: reportData.metrics.filteredClientsCount },
+      { section: 'Last Check In', value: formatDateTime(reportData.latest.attendance?.checkInTime) },
+      { section: 'Last Report Date', value: reportData.latest.report?.date || '-' },
+      { section: 'Last Order', value: reportData.latest.order?.customerName || reportData.latest.order?.companyName || '-' },
+      { section: 'Last Visit', value: reportData.latest.visit?.purpose || reportData.latest.visit?.clientName || '-' },
     ]);
 
-    return exportCsv(res, `staff-report-${staffUser.username || staffUser._id}.csv`, [
-      { field: 'Name', value: staffUser.name || '-' },
-      { field: 'Username', value: staffUser.username || '-' },
-      { field: 'Email', value: staffUser.email || '-' },
-      { field: 'Phone', value: staffUser.phone || '-' },
-      { field: 'Department', value: staffUser.department || '-' },
-      { field: 'Active', value: staffUser.isActive ? 'Yes' : 'No' },
-      { field: 'Attendance Entries', value: attendanceCount },
-      { field: 'Last Attendance Date', value: lastAttendance?.date || '-' },
-      { field: 'Last Check In', value: formatDateTime(lastAttendance?.checkInTime) },
-      { field: 'Last Check Out', value: formatDateTime(lastAttendance?.checkOutTime) },
-      { field: 'Reports', value: reportsCount },
-      { field: 'Latest Report', value: lastReport?.summary || '-' },
-      { field: 'Latest Report Date', value: lastReport?.date || '-' },
-      { field: 'Orders', value: ordersCount },
-      { field: 'Latest Order', value: lastOrder?.customerName || lastOrder?.companyName || '-' },
-      { field: 'Latest Order Submitted', value: formatDateTime(lastOrder?.createdAt) },
-      { field: 'Visits', value: visitsCount },
-      { field: 'Latest Visit', value: lastVisit?.purpose || lastVisit?.clientLabel || '-' },
-      { field: 'Latest Visit Date', value: lastVisit?.visitDate || '-' },
-      { field: 'Clients', value: clientsCount },
-    ]);
+    const attendanceSheet = workbook.addWorksheet('Attendance');
+    attendanceSheet.columns = [
+      { header: 'Date', key: 'date' },
+      { header: 'Check In', key: 'checkIn' },
+      { header: 'Check Out', key: 'checkOut' },
+      { header: 'Worked Minutes', key: 'workedMinutes' },
+      { header: 'Week Start KM', key: 'weekStartKm' },
+      { header: 'Week Start Entered At', key: 'weekStartAt' },
+      { header: 'Week End KM', key: 'weekEndKm' },
+      { header: 'Week End Entered At', key: 'weekEndAt' },
+      { header: 'Check In Note', key: 'checkInNote' },
+      { header: 'Check Out Note', key: 'checkOutNote' },
+    ];
+    attendanceSheet.addRows(
+      reportData.records.attendance.map((entry) => ({
+        date: entry.date || '-',
+        checkIn: formatDateTime(entry.checkInTime),
+        checkOut: formatDateTime(entry.checkOutTime),
+        workedMinutes: entry.totalWorkedMinutes || 0,
+        weekStartKm: entry.mileageWeekStart ?? '',
+        weekStartAt: formatDateTime(entry.mileageWeekStartAt),
+        weekEndKm: entry.mileageWeekEnd ?? '',
+        weekEndAt: formatDateTime(entry.mileageWeekEndAt),
+        checkInNote: csvCell(entry.checkInNote),
+        checkOutNote: csvCell(entry.checkOutNote),
+      }))
+    );
+
+    const reportsSheet = workbook.addWorksheet('Daily Reports');
+    reportsSheet.columns = [
+      { header: 'Report Date', key: 'date' },
+      { header: 'Created At', key: 'createdAt' },
+      { header: 'Summary', key: 'summary' },
+      { header: 'Notes', key: 'notes' },
+      { header: 'Follow Up Needed', key: 'followUpNeeded' },
+      { header: 'Visits In Report', key: 'visits' },
+    ];
+    reportsSheet.addRows(
+      reportData.records.reports.map((entry) => ({
+        date: entry.date || '-',
+        createdAt: formatDateTime(entry.createdAt),
+        summary: csvCell(entry.summary),
+        notes: csvCell(entry.notes),
+        followUpNeeded: entry.followUpNeeded ? 'Yes' : 'No',
+        visits: (entry.visits || []).map((visit) => `${visit.clientName || '-'}: ${csvCell(visit.outcome)}`).join(' | '),
+      }))
+    );
+
+    const ordersSheet = workbook.addWorksheet('Orders');
+    ordersSheet.columns = [
+      { header: 'Submitted At', key: 'submittedAt' },
+      { header: 'Status', key: 'status' },
+      { header: 'Customer', key: 'customer' },
+      { header: 'Company', key: 'company' },
+      { header: 'Contact Person', key: 'contactPerson' },
+      { header: 'Client Record', key: 'client' },
+      { header: 'Urgency', key: 'urgency' },
+      { header: 'Items', key: 'items' },
+      { header: 'Delivery Note', key: 'deliveryNote' },
+      { header: 'Notes', key: 'notes' },
+    ];
+    ordersSheet.addRows(
+      reportData.records.orders.map((entry) => ({
+        submittedAt: formatDateTime(entry.submittedAt || entry.createdAt),
+        status: entry.status || '-',
+        customer: entry.customerName || '-',
+        company: entry.companyName || '-',
+        contactPerson: entry.contactPerson || '-',
+        client: entry.client?.name || '-',
+        urgency: entry.urgency || '-',
+        items: (entry.items || []).map((item) => `${item.productName} x${item.quantity}${item.price ? ` @ ${item.price}` : ''}`).join(' | '),
+        deliveryNote: csvCell(entry.deliveryNote),
+        notes: csvCell(entry.notes),
+      }))
+    );
+
+    const visitsSheet = workbook.addWorksheet('Visits');
+    visitsSheet.columns = [
+      { header: 'Visit Date', key: 'visitDate' },
+      { header: 'Visit Time', key: 'visitTime' },
+      { header: 'Created At', key: 'createdAt' },
+      { header: 'Client', key: 'client' },
+      { header: 'Met Person', key: 'metPerson' },
+      { header: 'Location', key: 'location' },
+      { header: 'Purpose', key: 'purpose' },
+      { header: 'Discussion', key: 'discussion' },
+      { header: 'Outcome', key: 'outcome' },
+    ];
+    visitsSheet.addRows(
+      reportData.records.visits.map((entry) => ({
+        visitDate: entry.visitDate || '-',
+        visitTime: entry.visitTime || '-',
+        createdAt: formatDateTime(entry.createdAt),
+        client: entry.client?.name || entry.clientName || '-',
+        metPerson: entry.metPerson || '-',
+        location: entry.location || '-',
+        purpose: entry.purpose || '-',
+        discussion: csvCell(entry.discussionSummary),
+        outcome: csvCell(entry.outcome),
+      }))
+    );
+
+    const clientsSheet = workbook.addWorksheet('Clients');
+    clientsSheet.columns = [
+      { header: 'Name', key: 'name' },
+      { header: 'Type', key: 'type' },
+      { header: 'Department', key: 'department' },
+      { header: 'Contact Person', key: 'contactPerson' },
+      { header: 'Phone', key: 'phone' },
+      { header: 'Email', key: 'email' },
+      { header: 'Location', key: 'location' },
+      { header: 'Address', key: 'address' },
+      { header: 'Created At', key: 'createdAt' },
+      { header: 'Updated At', key: 'updatedAt' },
+      { header: 'Notes', key: 'notes' },
+    ];
+    clientsSheet.addRows(
+      reportData.records.clients.map((entry) => ({
+        name: entry.name || '-',
+        type: entry.companyType || '-',
+        department: entry.department || '-',
+        contactPerson: entry.contactPerson || '-',
+        phone: entry.phone || '-',
+        email: entry.email || '-',
+        location: entry.location || '-',
+        address: csvCell(entry.address),
+        createdAt: formatDateTime(entry.createdAt),
+        updatedAt: formatDateTime(entry.updatedAt),
+        notes: csvCell(entry.notes),
+      }))
+    );
+
+    const activitySheet = workbook.addWorksheet('Activity Log');
+    activitySheet.columns = [
+      { header: 'Time', key: 'time' },
+      { header: 'Module', key: 'module' },
+      { header: 'Action', key: 'action' },
+      { header: 'Record', key: 'record' },
+    ];
+    activitySheet.addRows(
+      reportData.records.activity.map((entry) => ({
+        time: formatDateTime(entry.createdAt),
+        module: entry.module || '-',
+        action: entry.action || '-',
+        record: entry.recordId?.toString?.() || '-',
+      }))
+    );
+
+    [summarySheet, attendanceSheet, reportsSheet, ordersSheet, visitsSheet, clientsSheet, activitySheet].forEach((sheet) => {
+      sheet.getRow(1).font = { bold: true };
+      autoFitWorksheet(sheet);
+    });
+
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="staff-report-${staffUser.username || staffUser._id}${selectedDate ? `-${selectedDate}` : ''}.xlsx"`
+    );
+    return res.send(buffer);
   } catch (error) {
     return next(error);
   }
