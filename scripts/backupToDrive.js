@@ -167,17 +167,46 @@ const exportCollections = async (db, outputDir) => {
 const uploadToDrive = async (archivePath, folderId) => {
   const auth = getDriveAuth();
   const drive = google.drive({ version: 'v3', auth });
+  const filename = process.env.BACKUP_FILENAME || 'lte-backup-latest.tgz';
+
+  const query = [
+    `'${folderId}' in parents`,
+    `name='${filename.replace(/'/g, "\\'")}'`,
+    'trashed=false',
+  ].join(' and ');
+
+  const existing = await drive.files.list({
+    q: query,
+    fields: 'files(id,name)',
+    pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+
+  const fileId = existing.data.files?.[0]?.id;
+  const media = {
+    mimeType: 'application/gzip',
+    body: fs.createReadStream(archivePath),
+  };
+
+  if (fileId) {
+    const response = await drive.files.update({
+      fileId,
+      media,
+      fields: 'id,name,size',
+      supportsAllDrives: true,
+    });
+    return response.data;
+  }
 
   const response = await drive.files.create({
     requestBody: {
-      name: path.basename(archivePath),
+      name: filename,
       parents: [folderId],
     },
-    media: {
-      mimeType: 'application/gzip',
-      body: fs.createReadStream(archivePath),
-    },
+    media,
     fields: 'id,name,size',
+    supportsAllDrives: true,
   });
 
   return response.data;

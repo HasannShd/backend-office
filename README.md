@@ -173,6 +173,10 @@ The schedule is set to 11:00 PM Bahrain time (20:00 UTC).
 Manual run:
 - GitHub → Actions → "Nightly MongoDB Backup to Google Drive" → Run workflow
 
+Notes:
+- By default the backup overwrites a single file named `lte-backup-latest.tgz`.
+- Change the name with `BACKUP_FILENAME` if needed.
+
 ## Notes For Future Tally Integration
 
 The portal order flow already separates submission from downstream integration. When Tally work starts later, add it behind the existing sales order notification/service layer instead of embedding it directly in the controller.
