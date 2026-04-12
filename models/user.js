@@ -18,6 +18,18 @@ const userSchema = new mongoose.Schema({
   mfaSecretEncrypted: String,
   mfaPendingSecretEncrypted: String,
   mfaRecoveryCodeHashes: { type: [String], default: [] },
+  trustedDevices: {
+    type: [
+      {
+        tokenHash: { type: String, required: true },
+        label: String,
+        createdAt: { type: Date, default: Date.now },
+        lastUsedAt: { type: Date, default: Date.now },
+        expiresAt: { type: Date, required: true },
+      },
+    ],
+    default: [],
+  },
   resetPasswordTokenHash: String,
   resetPasswordExpiresAt: Date,
   address: {

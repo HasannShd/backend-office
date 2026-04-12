@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-const TOTP_WINDOW = 1;
+const TOTP_WINDOW = 2;
 const TOTP_PERIOD = 30;
 const TOTP_DIGITS = 6;
 

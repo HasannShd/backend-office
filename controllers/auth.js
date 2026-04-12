@@ -55,6 +55,43 @@ const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 const normalizePhone = (phone) => String(phone || '').trim();
 const hashResetToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 const hashRecoveryCode = (code) => crypto.createHash('sha256').update(String(code || '').trim().toUpperCase()).digest('hex');
+const hashTrustedDeviceToken = (token) => crypto.createHash('sha256').update(String(token || '').trim()).digest('hex');
+const TRUSTED_DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const cleanTrustedDevices = (user) => {
+  const now = new Date();
+  user.trustedDevices = (user.trustedDevices || []).filter((entry) => entry?.expiresAt && new Date(entry.expiresAt) > now);
+};
+const buildTrustedDeviceLabel = (req) => {
+  const userAgent = String(req.headers['user-agent'] || '').trim();
+  if (!userAgent) return 'Trusted device';
+  if (/iphone/i.test(userAgent)) return 'iPhone browser';
+  if (/android/i.test(userAgent)) return 'Android browser';
+  if (/ipad/i.test(userAgent)) return 'iPad browser';
+  if (/windows/i.test(userAgent)) return 'Windows browser';
+  if (/macintosh|mac os/i.test(userAgent)) return 'Mac browser';
+  return 'Trusted browser';
+};
+const registerTrustedDevice = (user, req) => {
+  cleanTrustedDevices(user);
+  const deviceToken = crypto.randomBytes(32).toString('hex');
+  user.trustedDevices.push({
+    tokenHash: hashTrustedDeviceToken(deviceToken),
+    label: buildTrustedDeviceLabel(req),
+    createdAt: new Date(),
+    lastUsedAt: new Date(),
+    expiresAt: new Date(Date.now() + TRUSTED_DEVICE_TTL_MS),
+  });
+  return deviceToken;
+};
+const useTrustedDevice = (user, deviceToken) => {
+  if (!deviceToken) return false;
+  cleanTrustedDevices(user);
+  const tokenHash = hashTrustedDeviceToken(deviceToken);
+  const entry = (user.trustedDevices || []).find((item) => item.tokenHash === tokenHash);
+  if (!entry) return false;
+  entry.lastUsedAt = new Date();
+  return true;
+};
 const signSessionToken = (user) =>
   jwt.sign({ payload: buildPayload(user) }, process.env.JWT_SECRET, { expiresIn: TOKEN_TTLS[user.role] || TOKEN_TTLS.user });
 const signMfaChallengeToken = (user) =>
@@ -180,9 +217,14 @@ const signInHandler = async (req, res) => {
     await clearFailedLoginState(user);
 
     user.lastLoginAt = new Date();
+    const trustedDeviceToken = String(req.body.trustedDeviceToken || '').trim();
+    let trustedDeviceAccepted = false;
+    if (user.role === 'admin' && user.mfaEnabled && user.mfaSecretEncrypted) {
+      trustedDeviceAccepted = useTrustedDevice(user, trustedDeviceToken);
+    }
     await user.save();
 
-    if (user.role === 'admin' && user.mfaEnabled && user.mfaSecretEncrypted) {
+    if (user.role === 'admin' && user.mfaEnabled && user.mfaSecretEncrypted && !trustedDeviceAccepted) {
       const challengeToken = signMfaChallengeToken(user);
       await logActivity({
         user,
@@ -208,7 +250,7 @@ const signInHandler = async (req, res) => {
       metadata: { role: user.role },
     });
 
-    res.status(200).json({ token, user: buildPublicUser(user) });
+    res.status(200).json({ token, user: buildPublicUser(user), trustedDeviceAccepted });
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
@@ -223,6 +265,7 @@ router.post('/admin/mfa/verify-login', async (req, res) => {
   try {
     const challengeToken = String(req.body.challengeToken || '').trim();
     const code = String(req.body.code || '').trim();
+    const trustDevice = req.body.trustDevice === true;
     if (!challengeToken || !code) {
       return res.status(400).json({ err: 'Challenge token and MFA code are required.' });
     }
@@ -268,15 +311,18 @@ router.post('/admin/mfa/verify-login', async (req, res) => {
     await user.save();
     const token = signSessionToken(user);
     setAuthCookie(res, user, token);
+    const trustedDeviceToken = trustDevice ? registerTrustedDevice(user, req) : null;
+    if (trustedDeviceToken) await user.save();
 
     await logActivity({
       user,
       action: 'mfa_challenge_passed',
       module: 'auth',
       recordId: user._id,
+      metadata: trustDevice ? { trustedDevice: true } : undefined,
     });
 
-    return res.status(200).json({ token, user: buildPublicUser(user) });
+    return res.status(200).json({ token, user: buildPublicUser(user), trustedDeviceToken });
   } catch (err) {
     return res.status(500).json({ err: err.message });
   }
@@ -413,6 +459,12 @@ router.get('/admin/mfa/status', verifyToken, async (req, res) => {
     return res.json({
       mfaEnabled: Boolean(user.mfaEnabled && user.mfaSecretEncrypted),
       backupCodesRemaining: (user.mfaRecoveryCodeHashes || []).length,
+      trustedDevices: (user.trustedDevices || []).map((entry) => ({
+        label: entry.label || 'Trusted device',
+        createdAt: entry.createdAt,
+        lastUsedAt: entry.lastUsedAt,
+        expiresAt: entry.expiresAt,
+      })),
       passwordChangedAt: user.passwordChangedAt || null,
       lastLoginAt: user.lastLoginAt || null,
       smtpConfigured: Boolean(isMailerConfigured),
@@ -450,6 +502,7 @@ router.post('/admin/mfa/setup/start', verifyToken, async (req, res) => {
 router.post('/admin/mfa/setup/confirm', verifyToken, async (req, res) => {
   try {
     const code = String(req.body.code || '').trim();
+    const trustDevice = req.body.trustDevice === true;
     const user = await User.findById(req.user._id);
     if (!user || user.role !== 'admin') return res.status(404).json({ err: 'Admin user not found.' });
     if (!user.mfaPendingSecretEncrypted) return res.status(400).json({ err: 'Start MFA setup first.' });
@@ -463,6 +516,7 @@ router.post('/admin/mfa/setup/confirm', verifyToken, async (req, res) => {
     user.mfaPendingSecretEncrypted = undefined;
     user.mfaEnabled = true;
     user.mfaRecoveryCodeHashes = backupCodes.map(hashRecoveryCode);
+    const trustedDeviceToken = trustDevice ? registerTrustedDevice(user, req) : null;
     await user.save();
 
     await logActivity({
@@ -472,7 +526,7 @@ router.post('/admin/mfa/setup/confirm', verifyToken, async (req, res) => {
       recordId: user._id,
     });
 
-    return res.status(200).json({ backupCodes });
+    return res.status(200).json({ backupCodes, trustedDeviceToken });
   } catch (err) {
     return res.status(500).json({ err: err.message });
   }
@@ -510,6 +564,48 @@ router.post('/admin/mfa/disable', verifyToken, async (req, res) => {
     });
 
     return res.status(200).json({ message: 'MFA disabled.' });
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.post('/admin/mfa/recovery-codes/refresh', verifyToken, async (req, res) => {
+  try {
+    const code = String(req.body.code || '').trim().toUpperCase();
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'admin') return res.status(404).json({ err: 'Admin user not found.' });
+    if (!user.mfaEnabled || !user.mfaSecretEncrypted) return res.status(400).json({ err: 'MFA is not enabled.' });
+    if (!verifyTotp(decryptSecret(user.mfaSecretEncrypted), code)) {
+      return res.status(400).json({ err: 'Invalid MFA code.' });
+    }
+    const backupCodes = generateBackupCodes();
+    user.mfaRecoveryCodeHashes = backupCodes.map(hashRecoveryCode);
+    await user.save();
+    await logActivity({
+      user,
+      action: 'mfa_backup_codes_refreshed',
+      module: 'auth',
+      recordId: user._id,
+    });
+    return res.status(200).json({ backupCodes });
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.delete('/admin/mfa/trusted-devices', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'admin') return res.status(404).json({ err: 'Admin user not found.' });
+    user.trustedDevices = [];
+    await user.save();
+    await logActivity({
+      user,
+      action: 'trusted_devices_revoked',
+      module: 'auth',
+      recordId: user._id,
+    });
+    return res.status(200).json({ message: 'Trusted devices removed.' });
   } catch (err) {
     return res.status(500).json({ err: err.message });
   }
