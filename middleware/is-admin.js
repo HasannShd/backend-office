@@ -12,6 +12,14 @@ module.exports = async function isAdmin(req, res, next) {
       return res.status(403).json({ message: 'Admin access only' });
     }
 
+    const enforceAdminMfa = process.env.ENFORCE_ADMIN_MFA !== 'false';
+    if (enforceAdminMfa && (!user.mfaEnabled || !user.mfaSecretEncrypted)) {
+      return res.status(428).json({
+        message: 'Admin MFA setup is required before using this section.',
+        code: 'ADMIN_MFA_REQUIRED',
+      });
+    }
+
     // attach fresh user object for downstream handlers
     req.user = user;
 
