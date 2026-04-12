@@ -40,4 +40,11 @@ const sendMail = async ({ to, subject, text, html, attachments }) => {
   });
 };
 
-module.exports = { sendMail, isConfigured };
+const getNotificationRecipient = (...keys) => {
+  const values = keys
+    .map((key) => process.env[key])
+    .filter((value) => typeof value === 'string' && value.trim());
+  return values[0] || '';
+};
+
+module.exports = { sendMail, isConfigured, getNotificationRecipient };

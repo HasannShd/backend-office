@@ -81,7 +81,16 @@ Needed for email workflow:
 - `SMTP_USER`
 - `SMTP_PASS`
 - `SMTP_FROM`
+- `ATTENTION_NOTIFY_EMAIL`
 - `SALES_ORDER_NOTIFY_EMAIL`
+
+Useful optional inboxes:
+
+- `WEBSITE_ORDER_NOTIFY_EMAIL`
+- `ORDER_NOTIFY_EMAIL`
+- `CV_NOTIFY_EMAIL`
+- `CAREERS_NOTIFY_EMAIL`
+- `HR_NOTIFY_EMAIL`
 
 Needed for uploads:
 

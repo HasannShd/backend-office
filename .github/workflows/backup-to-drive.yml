@@ -11,6 +11,7 @@ jobs:
     env:
       BACKUP_PREFIX: lte-backup
       BACKUP_TZ: Asia/Bahrain
+      BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
       MONGO_URI: ${{ secrets.MONGO_URI }}
       GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
       GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}

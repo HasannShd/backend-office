@@ -1,4 +1,4 @@
-const { sendMail, isConfigured } = require('../utils/mailer');
+const { sendMail, isConfigured, getNotificationRecipient } = require('../utils/mailer');
 
 const formatCurrency = (value) => {
   if (value === null || value === undefined || value === '') return '-';
@@ -59,7 +59,13 @@ const buildOrderEmail = ({ order, staff }) => {
 };
 
 const sendSalesOrderEmail = async ({ order, staff }) => {
-  const to = process.env.SALES_ORDER_NOTIFY_EMAIL || process.env.ORDER_NOTIFY_EMAIL || process.env.SMTP_FROM;
+  const to = getNotificationRecipient(
+    'SALES_ORDER_NOTIFY_EMAIL',
+    'ORDER_NOTIFY_EMAIL',
+    'ATTENTION_NOTIFY_EMAIL',
+    'HR_NOTIFY_EMAIL',
+    'SMTP_FROM'
+  );
   if (!to) {
     return { sent: false, skipped: true, reason: 'No destination email configured.' };
   }
