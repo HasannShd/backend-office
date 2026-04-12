@@ -3,14 +3,11 @@ const mongoose = require('mongoose');
 
 const User = require('../models/user');
 const AttendanceLog = require('../models/attendanceLog');
-const Schedule = require('../models/schedule');
 const DailyReport = require('../models/dailyReport');
 const SalesOrder = require('../models/salesOrder');
-const ExpenseRequest = require('../models/expenseRequest');
 const ActivityLog = require('../models/activityLog');
 const Client = require('../models/client');
 const ClientVisit = require('../models/clientVisit');
-const CollectionLog = require('../models/collectionLog');
 const Notification = require('../models/notification');
 
 const requireAuthUser = require('../middleware/require-auth-user');
@@ -65,9 +62,7 @@ const applyAdminFilters = (req, base = {}) => {
   if (req.query.user && isValidObjectId(req.query.user)) filters.user = req.query.user;
   if (req.query.status) filters.status = req.query.status;
   if (req.query.date) {
-    if ('assignedDate' in base || req.path.includes('schedules')) filters.assignedDate = req.query.date;
-    else if (req.path.includes('attendance')) filters.date = req.query.date;
-    else if (req.path.includes('reports')) filters.date = req.query.date;
+    if (req.path.includes('attendance') || req.path.includes('reports')) filters.date = req.query.date;
   }
   return filters;
 };
@@ -83,12 +78,11 @@ router.use(requireAuthUser, requireRoles('admin'));
 router.get('/dashboard', async (req, res, next) => {
   try {
     const today = todayKey();
-    const [staffCount, checkedInToday, pendingReports, pendingExpenses, pendingOrders, visitsByEmployee, recentActivity] =
+    const [staffCount, checkedInToday, pendingReports, pendingOrders, visitsByEmployee, recentActivity] =
       await Promise.all([
         User.countDocuments({ role: 'sales_staff', isActive: true }),
         AttendanceLog.countDocuments({ date: today, checkInTime: { $exists: true, $ne: null } }),
         DailyReport.countDocuments({ date: today }),
-        ExpenseRequest.countDocuments({ status: { $in: ['submitted', 'under_review'] } }),
         SalesOrder.countDocuments({ status: { $in: ['submitted', 'reviewed'] } }),
         ClientVisit.aggregate([
           { $match: { visitDate: today } },
@@ -107,7 +101,6 @@ router.get('/dashboard', async (req, res, next) => {
         checkedInToday,
         notCheckedIn: Math.max(0, staffCount - checkedInToday),
         pendingReports,
-        pendingExpenses,
         pendingOrders,
       },
       visitsByEmployee,
@@ -139,39 +132,27 @@ router.get('/staff/:id/summary', async (req, res, next) => {
     const [
       attendanceCount,
       lastAttendance,
-      schedulesCount,
-      completedSchedules,
-      nextSchedule,
       reportsCount,
       lastReport,
       ordersCount,
       pendingOrders,
       lastOrder,
-      expensesCount,
-      pendingExpenses,
-      lastExpense,
       visitsCount,
       lastVisit,
-      collectionsCount,
+      clientsCount,
       unreadNotifications,
       recentActivity,
     ] = await Promise.all([
       AttendanceLog.countDocuments(userFilter),
       AttendanceLog.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
-      Schedule.countDocuments(userFilter),
-      Schedule.countDocuments({ ...userFilter, status: 'completed' }),
-      Schedule.findOne({ ...userFilter, assignedDate: { $gte: today } }).sort({ assignedDate: 1, startTime: 1 }),
       DailyReport.countDocuments(userFilter),
       DailyReport.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
       SalesOrder.countDocuments(userFilter),
       SalesOrder.countDocuments({ ...userFilter, status: { $in: ['submitted', 'reviewed', 'emailed', 'confirmed'] } }),
       SalesOrder.findOne(userFilter).sort({ createdAt: -1 }),
-      ExpenseRequest.countDocuments(userFilter),
-      ExpenseRequest.countDocuments({ ...userFilter, status: { $in: ['submitted', 'under_review'] } }),
-      ExpenseRequest.findOne(userFilter).sort({ createdAt: -1 }),
       ClientVisit.countDocuments(userFilter),
       ClientVisit.findOne(userFilter).sort({ visitDate: -1, createdAt: -1 }),
-      CollectionLog.countDocuments(userFilter),
+      Client.countDocuments({ assignedTo: staffUser._id }),
       Notification.countDocuments({ user: staffUser._id, read: false }),
       ActivityLog.find({ user: staffUser._id }).sort({ createdAt: -1 }).limit(12),
     ]);
@@ -181,23 +162,17 @@ router.get('/staff/:id/summary', async (req, res, next) => {
       today,
       metrics: {
         attendanceCount,
-        schedulesCount,
-        completedSchedules,
         reportsCount,
         ordersCount,
         pendingOrders,
-        expensesCount,
-        pendingExpenses,
         visitsCount,
-        collectionsCount,
+        clientsCount,
         unreadNotifications,
       },
       latest: {
         attendance: lastAttendance,
-        nextSchedule,
         report: lastReport,
         order: lastOrder,
-        expense: lastExpense,
         visit: lastVisit,
       },
       recentActivity,
@@ -218,31 +193,23 @@ router.get('/staff/:id/report', async (req, res, next) => {
     const [
       attendanceCount,
       lastAttendance,
-      schedulesCount,
-      nextSchedule,
       reportsCount,
       lastReport,
       ordersCount,
       lastOrder,
-      expensesCount,
-      lastExpense,
       visitsCount,
       lastVisit,
-      collectionsCount,
+      clientsCount,
     ] = await Promise.all([
       AttendanceLog.countDocuments(userFilter),
       AttendanceLog.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
-      Schedule.countDocuments(userFilter),
-      Schedule.findOne(userFilter).sort({ assignedDate: -1, startTime: -1 }),
       DailyReport.countDocuments(userFilter),
       DailyReport.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
       SalesOrder.countDocuments(userFilter),
       SalesOrder.findOne(userFilter).sort({ createdAt: -1 }),
-      ExpenseRequest.countDocuments(userFilter),
-      ExpenseRequest.findOne(userFilter).sort({ createdAt: -1 }),
       ClientVisit.countDocuments(userFilter),
       ClientVisit.findOne(userFilter).sort({ visitDate: -1, createdAt: -1 }),
-      CollectionLog.countDocuments(userFilter),
+      Client.countDocuments({ assignedTo: staffUser._id }),
     ]);
 
     return exportCsv(res, `staff-report-${staffUser.username || staffUser._id}.csv`, [
@@ -256,22 +223,16 @@ router.get('/staff/:id/report', async (req, res, next) => {
       { field: 'Last Attendance Date', value: lastAttendance?.date || '-' },
       { field: 'Last Check In', value: formatDateTime(lastAttendance?.checkInTime) },
       { field: 'Last Check Out', value: formatDateTime(lastAttendance?.checkOutTime) },
-      { field: 'Schedules', value: schedulesCount },
-      { field: 'Latest Schedule', value: nextSchedule?.title || '-' },
-      { field: 'Latest Schedule Date', value: nextSchedule?.assignedDate || '-' },
       { field: 'Reports', value: reportsCount },
       { field: 'Latest Report', value: lastReport?.summary || '-' },
       { field: 'Latest Report Date', value: lastReport?.date || '-' },
       { field: 'Orders', value: ordersCount },
       { field: 'Latest Order', value: lastOrder?.customerName || lastOrder?.companyName || '-' },
       { field: 'Latest Order Submitted', value: formatDateTime(lastOrder?.createdAt) },
-      { field: 'Expenses', value: expensesCount },
-      { field: 'Latest Expense', value: lastExpense?.title || '-' },
-      { field: 'Latest Expense Submitted', value: formatDateTime(lastExpense?.createdAt) },
       { field: 'Visits', value: visitsCount },
       { field: 'Latest Visit', value: lastVisit?.purpose || lastVisit?.clientLabel || '-' },
       { field: 'Latest Visit Date', value: lastVisit?.visitDate || '-' },
-      { field: 'Collections', value: collectionsCount },
+      { field: 'Clients', value: clientsCount },
     ]);
   } catch (error) {
     return next(error);
@@ -363,72 +324,6 @@ router.get('/reports', async (req, res, next) => {
   }
 });
 
-router.get('/schedules', async (req, res, next) => {
-  try {
-    const schedules = await Schedule.find(applyAdminFilters(req))
-      .sort({ assignedDate: 1, startTime: 1 })
-      .populate('user client createdBy', 'name username');
-    return ok(res, { schedules });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.post('/schedules', async (req, res, next) => {
-  try {
-    const { user, title, assignedDate } = req.body;
-    if (!isValidObjectId(user) || !title || !assignedDate) {
-      return fail(res, 'Assigned user, title, and assigned date are required.', 400);
-    }
-
-    const schedule = await Schedule.create({
-      ...req.body,
-      user,
-      client: isValidObjectId(req.body.client) ? req.body.client : undefined,
-      createdBy: req.user._id,
-    });
-
-    await sendUserNotification({
-      user,
-      title: 'New schedule assigned',
-      message: `${title} has been scheduled for ${assignedDate}.`,
-      relatedModule: 'schedule',
-      relatedRecord: schedule._id,
-    });
-
-    await logActivity({
-      user: req.user,
-      action: 'schedule_assigned',
-      module: 'schedule',
-      recordId: schedule._id,
-      metadata: { assignedDate, user },
-    });
-
-    return ok(res, { schedule }, 'Schedule assigned.', 201);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.patch('/schedules/:id', async (req, res, next) => {
-  try {
-    if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid schedule id.', 400);
-    const schedule = await Schedule.findByIdAndUpdate(
-      req.params.id,
-      {
-        ...req.body,
-        ...(req.body.client && isValidObjectId(req.body.client) ? { client: req.body.client } : {}),
-      },
-      { new: true }
-    );
-    if (!schedule) return fail(res, 'Schedule not found.', 404);
-    await logActivity({ user: req.user, action: 'schedule_admin_updated', module: 'schedule', recordId: schedule._id });
-    return ok(res, { schedule }, 'Schedule updated.');
-  } catch (error) {
-    return next(error);
-  }
-});
-
 router.get('/orders', async (req, res, next) => {
   try {
     const orders = await SalesOrder.find(applyAdminFilters(req)).sort({ createdAt: -1 }).populate('user client', 'name username');
@@ -466,43 +361,6 @@ router.patch('/orders/:id', async (req, res, next) => {
   }
 });
 
-router.get('/expenses', async (req, res, next) => {
-  try {
-    const expenses = await ExpenseRequest.find(applyAdminFilters(req)).sort({ createdAt: -1 }).populate('user relatedClient', 'name username');
-    return ok(res, { expenses });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.patch('/expenses/:id', async (req, res, next) => {
-  try {
-    if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid expense id.', 400);
-    const expense = await ExpenseRequest.findById(req.params.id);
-    if (!expense) return fail(res, 'Expense not found.', 404);
-    ['status', 'adminNote'].forEach((field) => {
-      if (req.body[field] !== undefined) expense[field] = req.body[field];
-    });
-    expense.reviewedBy = req.user._id;
-    expense.reviewedAt = new Date();
-    if (expense.status === 'paid') expense.paidAt = new Date();
-    await expense.save();
-
-    await sendUserNotification({
-      user: expense.user,
-      title: 'Expense request updated',
-      message: `${expense.title} is now ${expense.status}.`,
-      relatedModule: 'expense_request',
-      relatedRecord: expense._id,
-    });
-
-    await logActivity({ user: req.user, action: 'expense_updated', module: 'expense_request', recordId: expense._id });
-    return ok(res, { expense }, 'Expense updated.');
-  } catch (error) {
-    return next(error);
-  }
-});
-
 router.get('/clients', async (req, res, next) => {
   try {
     const clients = await Client.find({}).sort({ updatedAt: -1 }).populate('assignedTo createdBy', 'name username');
@@ -516,15 +374,6 @@ router.get('/visits', async (req, res, next) => {
   try {
     const visits = await ClientVisit.find(applyAdminFilters(req)).sort({ createdAt: -1 }).populate('user client relatedSchedule', 'name username');
     return ok(res, { visits });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.get('/collections', async (req, res, next) => {
-  try {
-    const collections = await CollectionLog.find(applyAdminFilters(req)).sort({ createdAt: -1 }).populate('user client', 'name username');
-    return ok(res, { collections });
   } catch (error) {
     return next(error);
   }
@@ -572,17 +421,6 @@ router.get('/exports/:resource', async (req, res, next) => {
             date: row.date,
             summary: row.summary,
             followUpNeeded: row.followUpNeeded,
-          }))
-        ),
-      expenses: async () =>
-        ExpenseRequest.find({}).populate('user', 'name username').lean().then((rows) =>
-          rows.map((row) => ({
-            employee: row.user?.name || row.user?.username || '-',
-            title: row.title,
-            category: row.category,
-            amount: row.amount,
-            expenseDate: row.expenseDate,
-            status: row.status,
           }))
         ),
       orders: async () =>

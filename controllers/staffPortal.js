@@ -2,13 +2,10 @@ const express = require('express');
 const mongoose = require('mongoose');
 
 const AttendanceLog = require('../models/attendanceLog');
-const Schedule = require('../models/schedule');
 const DailyReport = require('../models/dailyReport');
 const SalesOrder = require('../models/salesOrder');
-const ExpenseRequest = require('../models/expenseRequest');
 const Client = require('../models/client');
 const ClientVisit = require('../models/clientVisit');
-const CollectionLog = require('../models/collectionLog');
 const Notification = require('../models/notification');
 
 const requireAuthUser = require('../middleware/require-auth-user');
@@ -64,13 +61,11 @@ router.use(requireAuthUser, requireRoles('sales_staff'));
 
 router.get('/dashboard', async (req, res, next) => {
   try {
-    const [attendance, schedules, reports, notifications, recentOrders, recentExpenses] = await Promise.all([
+    const [attendance, reports, notifications, recentOrders] = await Promise.all([
       AttendanceLog.findOne(getOwnFilter(req, { date: todayKey() })),
-      Schedule.find(getOwnFilter(req, { assignedDate: todayKey() })).sort({ startTime: 1 }).limit(10).populate('client', 'name'),
       DailyReport.find(getOwnFilter(req)).sort({ createdAt: -1 }).limit(3),
       Notification.find({ user: req.user._id, read: false }).sort({ createdAt: -1 }).limit(5),
       SalesOrder.find(getOwnFilter(req)).sort({ createdAt: -1 }).limit(3),
-      ExpenseRequest.find(getOwnFilter(req)).sort({ createdAt: -1 }).limit(3),
     ]);
 
     return ok(res, {
@@ -84,16 +79,13 @@ router.get('/dashboard', async (req, res, next) => {
             checkOutTime: attendance.checkOutTime,
           }
         : { checkedIn: false, checkedOut: false },
-      schedules,
       notifications,
       quickStats: {
         unreadNotifications: notifications.length,
         recentOrders: recentOrders.length,
-        recentExpenses: recentExpenses.length,
       },
       recentActivity: [
         ...recentOrders.map((record) => toRecentActivityItem(record, 'Order submitted')),
-        ...recentExpenses.map((record) => toRecentActivityItem(record, 'Expense submitted')),
         ...reports.map((record) => toRecentActivityItem(record, 'Daily report submitted')),
       ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 8),
     });
@@ -234,42 +226,6 @@ router.post('/attendance/mileage', async (req, res, next) => {
     });
 
     return ok(res, { record }, 'Weekly mileage saved.');
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.get('/schedules', async (req, res, next) => {
-  try {
-    const filters = getOwnFilter(req);
-    if (req.query.date) filters.assignedDate = req.query.date;
-    if (req.query.status) filters.status = req.query.status;
-    const schedules = await Schedule.find(filters).sort({ assignedDate: 1, startTime: 1 }).populate('client', 'name');
-    return ok(res, { schedules });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.patch('/schedules/:id', async (req, res, next) => {
-  try {
-    if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid schedule id.', 400);
-    const schedule = await Schedule.findOne({ _id: req.params.id, user: req.user._id });
-    if (!schedule) return fail(res, 'Schedule not found.', 404);
-
-    if (req.body.status) schedule.status = req.body.status;
-    if (typeof req.body.notes === 'string') schedule.notes = req.body.notes;
-    await schedule.save();
-
-    await logActivity({
-      user: req.user,
-      action: 'schedule_updated',
-      module: 'schedule',
-      recordId: schedule._id,
-      metadata: { status: schedule.status },
-    });
-
-    return ok(res, { schedule }, 'Schedule updated.');
   } catch (error) {
     return next(error);
   }
@@ -418,49 +374,6 @@ router.get('/orders/export', async (req, res, next) => {
   }
 });
 
-router.get('/expenses', async (req, res, next) => {
-  try {
-    const expenses = await ExpenseRequest.find(getOwnFilter(req)).sort({ createdAt: -1 }).populate('relatedClient', 'name');
-    return ok(res, { expenses });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.post('/expenses', async (req, res, next) => {
-  try {
-    const { title, category, amount, expenseDate, description, relatedReference, relatedClient, receiptUrl, paymentMethod } = req.body;
-    if (!title || !category || amount === undefined || !expenseDate) {
-      return fail(res, 'Title, category, amount, and expense date are required.', 400);
-    }
-
-    const expense = await ExpenseRequest.create({
-      user: req.user._id,
-      title,
-      category,
-      amount,
-      expenseDate,
-      description,
-      relatedReference,
-      relatedClient: isValidObjectId(relatedClient) ? relatedClient : undefined,
-      receiptUrl,
-      paymentMethod,
-    });
-
-    await logActivity({
-      user: req.user,
-      action: 'expense_submitted',
-      module: 'expense_request',
-      recordId: expense._id,
-      metadata: { amount },
-    });
-
-    return ok(res, { expense }, 'Expense request submitted.', 201);
-  } catch (error) {
-    return next(error);
-  }
-});
-
 router.get('/clients', async (req, res, next) => {
   try {
     const clients = await Client.find(getOwnedClientFilter(req.user._id)).sort({ updatedAt: -1 });
@@ -599,40 +512,6 @@ router.post('/visits', async (req, res, next) => {
   }
 });
 
-router.get('/collections', async (req, res, next) => {
-  try {
-    const collections = await CollectionLog.find(getOwnFilter(req)).sort({ createdAt: -1 }).populate('client');
-    return ok(res, { collections });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.post('/collections', async (req, res, next) => {
-  try {
-    const collection = await CollectionLog.create({
-      ...req.body,
-      user: req.user._id,
-      client: isValidObjectId(req.body.client) ? req.body.client : undefined,
-    });
-    await logActivity({ user: req.user, action: 'collection_logged', module: 'collection', recordId: collection._id });
-    return ok(res, { collection }, 'Collection log saved.', 201);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.patch('/collections/:id', async (req, res, next) => {
-  try {
-    if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid collection id.', 400);
-    const collection = await CollectionLog.findOneAndUpdate({ _id: req.params.id, user: req.user._id }, req.body, { new: true });
-    if (!collection) return fail(res, 'Collection not found.', 404);
-    await logActivity({ user: req.user, action: 'collection_updated', module: 'collection', recordId: collection._id });
-    return ok(res, { collection }, 'Collection updated.');
-  } catch (error) {
-    return next(error);
-  }
-});
 
 router.get('/notifications', async (req, res, next) => {
   try {
