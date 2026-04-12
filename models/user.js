@@ -14,6 +14,10 @@ const userSchema = new mongoose.Schema({
   lastFailedLoginAt: Date,
   lockedUntil: Date,
   passwordChangedAt: { type: Date, default: Date.now },
+  mfaEnabled: { type: Boolean, default: false },
+  mfaSecretEncrypted: String,
+  mfaPendingSecretEncrypted: String,
+  mfaRecoveryCodeHashes: { type: [String], default: [] },
   resetPasswordTokenHash: String,
   resetPasswordExpiresAt: Date,
   address: {

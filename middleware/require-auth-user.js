@@ -4,7 +4,9 @@ const verifyToken = require('./verify-token');
 module.exports = async function requireAuthUser(req, res, next) {
   verifyToken(req, res, async () => {
     try {
-      const user = await User.findById(req.user._id).select('-hashedPassword');
+      const user = await User.findById(req.user._id).select(
+        '-hashedPassword -resetPasswordTokenHash -resetPasswordExpiresAt -mfaSecretEncrypted -mfaPendingSecretEncrypted -mfaRecoveryCodeHashes'
+      );
       if (!user) {
         return res.status(401).json({ ok: false, message: 'User not found.' });
       }

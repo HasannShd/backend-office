@@ -1,11 +1,12 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { MongoClient } = require('mongodb');
 const { google } = require('googleapis');
 const tar = require('tar');
 
-const requiredEnv = ['MONGO_URI', 'GDRIVE_FOLDER_ID'];
+const requiredEnv = ['MONGO_URI', 'GDRIVE_FOLDER_ID', 'BACKUP_ENCRYPTION_KEY'];
 
 const ensureEnv = () => {
   const missing = requiredEnv.filter((key) => !process.env[key]);
@@ -132,6 +133,25 @@ const toExtendedJson = (value) => {
 };
 
 const stringifyDoc = (doc) => JSON.stringify(toExtendedJson(doc));
+const getEncryptionKey = () =>
+  crypto.createHash('sha256').update(String(process.env.BACKUP_ENCRYPTION_KEY || '')).digest();
+
+const encryptArchive = async (sourcePath, targetPath) => {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getEncryptionKey(), iv);
+  const input = fs.createReadStream(sourcePath);
+  const output = fs.createWriteStream(targetPath);
+
+  output.write(iv);
+  await new Promise((resolve, reject) => {
+    input.on('error', reject);
+    output.on('error', reject);
+    output.on('finish', resolve);
+    input.pipe(cipher).pipe(output);
+  });
+
+  fs.appendFileSync(targetPath, cipher.getAuthTag());
+};
 
 const exportCollections = async (db, outputDir) => {
   const collections = await db.collections();
@@ -167,7 +187,7 @@ const exportCollections = async (db, outputDir) => {
 const uploadToDrive = async (archivePath, folderId) => {
   const auth = getDriveAuth();
   const drive = google.drive({ version: 'v3', auth });
-  const filename = process.env.BACKUP_FILENAME || 'lte-backup-latest.tgz';
+  const filename = process.env.BACKUP_FILENAME || 'lte-backup-latest.tgz.enc';
 
   const query = [
     `'${folderId}' in parents`,
@@ -185,7 +205,7 @@ const uploadToDrive = async (archivePath, folderId) => {
 
   const fileId = existing.data.files?.[0]?.id;
   const media = {
-    mimeType: 'application/gzip',
+    mimeType: 'application/octet-stream',
     body: fs.createReadStream(archivePath),
   };
 
@@ -219,6 +239,7 @@ const main = async () => {
   const timestamp = formatTimestamp();
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
   const archivePath = path.join(os.tmpdir(), `${prefix}-${timestamp}.tgz`);
+  const encryptedArchivePath = `${archivePath}.enc`;
   const mongoUri = process.env.MONGO_URI;
   const folderId = process.env.GDRIVE_FOLDER_ID;
 
@@ -243,12 +264,15 @@ const main = async () => {
       ['.']
     );
 
-    const upload = await uploadToDrive(archivePath, folderId);
+    await encryptArchive(archivePath, encryptedArchivePath);
+
+    const upload = await uploadToDrive(encryptedArchivePath, folderId);
     console.log('Backup uploaded:', upload);
   } finally {
     await client.close().catch(() => {});
     fs.rmSync(tempDir, { recursive: true, force: true });
     fs.rmSync(archivePath, { force: true });
+    fs.rmSync(encryptedArchivePath, { force: true });
   }
 };
 

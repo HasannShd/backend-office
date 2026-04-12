@@ -223,7 +223,9 @@ router.get('/dashboard', async (req, res, next) => {
 
 router.get('/staff', async (req, res, next) => {
   try {
-    const staff = await User.find({ role: 'sales_staff' }).select('-hashedPassword').sort({ name: 1, username: 1 });
+    const staff = await User.find({ role: 'sales_staff' })
+      .select('-hashedPassword -resetPasswordTokenHash -resetPasswordExpiresAt -mfaSecretEncrypted -mfaPendingSecretEncrypted -mfaRecoveryCodeHashes')
+      .sort({ name: 1, username: 1 });
     return ok(res, { staff });
   } catch (error) {
     return next(error);
@@ -233,7 +235,8 @@ router.get('/staff', async (req, res, next) => {
 router.get('/staff/:id/summary', async (req, res, next) => {
   try {
     if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid staff id.', 400);
-    const staffUser = await User.findOne({ _id: req.params.id, role: 'sales_staff' }).select('-hashedPassword');
+    const staffUser = await User.findOne({ _id: req.params.id, role: 'sales_staff' })
+      .select('-hashedPassword -resetPasswordTokenHash -resetPasswordExpiresAt -mfaSecretEncrypted -mfaPendingSecretEncrypted -mfaRecoveryCodeHashes');
     if (!staffUser) return fail(res, 'Staff user not found.', 404);
     const selectedDate = trimText(req.query.date);
     const reportData = await buildStaffReportData(staffUser, selectedDate);
@@ -255,7 +258,8 @@ router.get('/staff/:id/summary', async (req, res, next) => {
 router.get('/staff/:id/report', async (req, res, next) => {
   try {
     if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid staff id.', 400);
-    const staffUser = await User.findOne({ _id: req.params.id, role: 'sales_staff' }).select('-hashedPassword');
+    const staffUser = await User.findOne({ _id: req.params.id, role: 'sales_staff' })
+      .select('-hashedPassword -resetPasswordTokenHash -resetPasswordExpiresAt -mfaSecretEncrypted -mfaPendingSecretEncrypted -mfaRecoveryCodeHashes');
     if (!staffUser) return fail(res, 'Staff user not found.', 404);
     const selectedDate = trimText(req.query.date);
     const reportData = await buildStaffReportData(staffUser, selectedDate);

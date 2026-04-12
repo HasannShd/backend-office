@@ -1,6 +1,10 @@
+const crypto = require('crypto');
+
 const USER_COOKIE = 'lte_user_token';
 const STAFF_COOKIE = 'lte_staff_token';
 const ADMIN_COOKIE = 'lte_admin_token';
+const MFA_CHALLENGE_TTL_MS = 10 * 60 * 1000;
+const MFA_CHALLENGE_PURPOSE = 'admin-mfa';
 
 const COOKIE_NAMES = {
   user: USER_COOKIE,
@@ -90,6 +94,29 @@ const validatePasswordStrength = (password) => {
   return null;
 };
 
+const getMfaEncryptionKey = () =>
+  crypto.createHash('sha256').update(String(process.env.MFA_ENCRYPTION_KEY || process.env.JWT_SECRET || '')).digest();
+
+const encryptSecret = (plainText) => {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getMfaEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(String(plainText), 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
+};
+
+const decryptSecret = (payload) => {
+  if (!payload) return '';
+  const [ivHex, tagHex, dataHex] = String(payload).split(':');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', getMfaEncryptionKey(), Buffer.from(ivHex, 'hex'));
+  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(dataHex, 'hex')),
+    decipher.final(),
+  ]);
+  return decrypted.toString('utf8');
+};
+
 const isUserLocked = (user) => Boolean(user?.lockedUntil && new Date(user.lockedUntil) > new Date());
 
 const registerFailedLoginAttempt = async (user) => {
@@ -110,11 +137,15 @@ const clearFailedLoginState = async (user) => {
 };
 
 module.exports = {
+  MFA_CHALLENGE_TTL_MS,
+  MFA_CHALLENGE_PURPOSE,
   TOKEN_TTLS,
   MAX_FAILED_LOGIN_ATTEMPTS,
   LOGIN_LOCK_MINUTES,
   clearAuthCookies,
   clearFailedLoginState,
+  decryptSecret,
+  encryptSecret,
   getTokenFromRequest,
   setAuthCookie,
   validatePasswordStrength,

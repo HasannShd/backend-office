@@ -1,6 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const readline = require('readline');
 const tar = require('tar');
 const {
@@ -23,6 +24,9 @@ const ensureEnv = () => {
   const missing = requiredEnv.filter((key) => !process.env[key]);
   if (missing.length) {
     throw new Error(`Missing required env: ${missing.join(', ')}`);
+  }
+  if (String(process.env.BACKUP_ARCHIVE || '').endsWith('.enc') && !process.env.BACKUP_ENCRYPTION_KEY) {
+    throw new Error('Missing required env: BACKUP_ENCRYPTION_KEY for encrypted backup restore.');
   }
 };
 
@@ -76,6 +80,31 @@ const fromExtendedJson = (value) => {
 };
 
 const parseJsonLine = (line) => fromExtendedJson(JSON.parse(line));
+const getEncryptionKey = () =>
+  crypto.createHash('sha256').update(String(process.env.BACKUP_ENCRYPTION_KEY || '')).digest();
+
+const decryptArchive = async (sourcePath, targetPath) => {
+  const stat = fs.statSync(sourcePath);
+  if (stat.size <= 28) throw new Error('Encrypted archive is too small to decrypt.');
+  const fileHandle = fs.openSync(sourcePath, 'r');
+  const iv = Buffer.alloc(12);
+  const authTag = Buffer.alloc(16);
+  fs.readSync(fileHandle, iv, 0, 12, 0);
+  fs.readSync(fileHandle, authTag, 0, 16, stat.size - 16);
+  fs.closeSync(fileHandle);
+
+  const decipher = crypto.createDecipheriv('aes-256-gcm', getEncryptionKey(), iv);
+  decipher.setAuthTag(authTag);
+
+  const input = fs.createReadStream(sourcePath, { start: 12, end: stat.size - 17 });
+  const output = fs.createWriteStream(targetPath);
+  await new Promise((resolve, reject) => {
+    input.on('error', reject);
+    output.on('error', reject);
+    output.on('finish', resolve);
+    input.pipe(decipher).pipe(output);
+  });
+};
 
 const listCollections = (dir) => {
   const metaPath = path.join(dir, 'metadata.json');
@@ -136,7 +165,13 @@ const main = async () => {
   }
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lte-restore-'));
-  await tar.x({ file: archivePath, cwd: tempDir });
+  const archiveToExtract = archivePath.endsWith('.enc')
+    ? path.join(tempDir, 'backup.tgz')
+    : archivePath;
+  if (archivePath.endsWith('.enc')) {
+    await decryptArchive(archivePath, archiveToExtract);
+  }
+  await tar.x({ file: archiveToExtract, cwd: tempDir });
 
   const client = new MongoClient(process.env.MONGO_URI, {
     maxPoolSize: 2,

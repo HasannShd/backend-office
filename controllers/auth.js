@@ -7,10 +7,15 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/user');
 const { sendMail, isConfigured: isMailerConfigured } = require('../utils/mailer');
 const { logActivity } = require('../services/activity-log-service');
+const { buildOtpAuthUrl, generateBackupCodes, generateSecret, verifyTotp } = require('../utils/totp');
 const {
+  MFA_CHALLENGE_PURPOSE,
+  MFA_CHALLENGE_TTL_MS,
   TOKEN_TTLS,
   clearAuthCookies,
   clearFailedLoginState,
+  decryptSecret,
+  encryptSecret,
   isUserLocked,
   registerFailedLoginAttempt,
   setAuthCookie,
@@ -49,8 +54,36 @@ const normalizeUsername = (email, username) => {
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 const normalizePhone = (phone) => String(phone || '').trim();
 const hashResetToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
+const hashRecoveryCode = (code) => crypto.createHash('sha256').update(String(code || '').trim().toUpperCase()).digest('hex');
 const signSessionToken = (user) =>
   jwt.sign({ payload: buildPayload(user) }, process.env.JWT_SECRET, { expiresIn: TOKEN_TTLS[user.role] || TOKEN_TTLS.user });
+const signMfaChallengeToken = (user) =>
+  jwt.sign(
+    {
+      payload: {
+        _id: user._id,
+        role: user.role,
+        purpose: MFA_CHALLENGE_PURPOSE,
+      },
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: Math.floor(MFA_CHALLENGE_TTL_MS / 1000) }
+  );
+const buildPublicUser = (user) => ({
+  _id: user._id,
+  username: user.username,
+  email: user.email,
+  phone: user.phone,
+  name: user.name,
+  department: user.department,
+  marketingOptIn: user.marketingOptIn,
+  isActive: user.isActive,
+  role: user.role,
+  lastLoginAt: user.lastLoginAt,
+  createdAt: user.createdAt,
+  updatedAt: user.updatedAt,
+  mfaEnabled: Boolean(user.mfaEnabled),
+});
 
 const signUpHandler = async (req, res) => {
   try {
@@ -95,7 +128,7 @@ const signUpHandler = async (req, res) => {
       metadata: { role: user.role },
     });
 
-    res.status(201).json({ user: buildPayload(user) });
+    res.status(201).json({ user: buildPublicUser(user) });
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
@@ -146,10 +179,26 @@ const signInHandler = async (req, res) => {
 
     await clearFailedLoginState(user);
 
-    const token = signSessionToken(user);
-    setAuthCookie(res, user, token);
     user.lastLoginAt = new Date();
     await user.save();
+
+    if (user.role === 'admin' && user.mfaEnabled && user.mfaSecretEncrypted) {
+      const challengeToken = signMfaChallengeToken(user);
+      await logActivity({
+        user,
+        action: 'mfa_challenge_issued',
+        module: 'auth',
+        recordId: user._id,
+        metadata: { role: user.role },
+      });
+      return res.status(200).json({
+        mfaRequired: true,
+        challengeToken,
+      });
+    }
+
+    const token = signSessionToken(user);
+    setAuthCookie(res, user, token);
 
     await logActivity({
       user,
@@ -159,7 +208,7 @@ const signInHandler = async (req, res) => {
       metadata: { role: user.role },
     });
 
-    res.status(200).json({ user: buildPayload(user) });
+    res.status(200).json({ user: buildPublicUser(user) });
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
@@ -169,6 +218,69 @@ router.post('/sign-up', signUpHandler);
 router.post('/register', signUpHandler);
 router.post('/sign-in', signInHandler);
 router.post('/login', signInHandler);
+
+router.post('/admin/mfa/verify-login', async (req, res) => {
+  try {
+    const challengeToken = String(req.body.challengeToken || '').trim();
+    const code = String(req.body.code || '').trim();
+    if (!challengeToken || !code) {
+      return res.status(400).json({ err: 'Challenge token and MFA code are required.' });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(challengeToken, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(400).json({ err: 'MFA challenge is invalid or expired.' });
+    }
+
+    if (decoded?.payload?.purpose !== MFA_CHALLENGE_PURPOSE || decoded?.payload?.role !== 'admin') {
+      return res.status(400).json({ err: 'Invalid MFA challenge.' });
+    }
+
+    const user = await User.findById(decoded.payload._id);
+    if (!user || user.role !== 'admin' || !user.mfaEnabled || !user.mfaSecretEncrypted) {
+      return res.status(400).json({ err: 'Admin MFA is not available for this account.' });
+    }
+
+    const normalizedCode = code.toUpperCase();
+    let valid = verifyTotp(decryptSecret(user.mfaSecretEncrypted), normalizedCode);
+
+    if (!valid) {
+      const recoveryIndex = (user.mfaRecoveryCodeHashes || []).findIndex((entry) => entry === hashRecoveryCode(normalizedCode));
+      if (recoveryIndex !== -1) {
+        user.mfaRecoveryCodeHashes.splice(recoveryIndex, 1);
+        valid = true;
+      }
+    }
+
+    if (!valid) {
+      await logActivity({
+        user,
+        action: 'mfa_challenge_failed',
+        module: 'auth',
+        recordId: user._id,
+      });
+      await user.save();
+      return res.status(401).json({ err: 'Invalid MFA code.' });
+    }
+
+    await user.save();
+    const token = signSessionToken(user);
+    setAuthCookie(res, user, token);
+
+    await logActivity({
+      user,
+      action: 'mfa_challenge_passed',
+      module: 'auth',
+      recordId: user._id,
+    });
+
+    return res.status(200).json({ user: buildPublicUser(user) });
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
 
 router.post('/admin/forgot-password', async (req, res) => {
   try {
@@ -294,12 +406,113 @@ router.post('/logout', (req, res) => {
   return res.status(200).json({ message: 'Logged out.' });
 });
 
+router.get('/admin/mfa/status', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'admin') return res.status(404).json({ err: 'Admin user not found.' });
+    return res.json({
+      mfaEnabled: Boolean(user.mfaEnabled && user.mfaSecretEncrypted),
+      backupCodesRemaining: (user.mfaRecoveryCodeHashes || []).length,
+    });
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.post('/admin/mfa/setup/start', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'admin') return res.status(404).json({ err: 'Admin user not found.' });
+    const secret = generateSecret();
+    user.mfaPendingSecretEncrypted = encryptSecret(secret);
+    await user.save();
+    return res.status(200).json({
+      manualKey: secret,
+      otpAuthUrl: buildOtpAuthUrl({
+        secret,
+        accountName: user.email || user.username,
+        issuer: 'LTE Admin',
+      }),
+    });
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.post('/admin/mfa/setup/confirm', verifyToken, async (req, res) => {
+  try {
+    const code = String(req.body.code || '').trim();
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'admin') return res.status(404).json({ err: 'Admin user not found.' });
+    if (!user.mfaPendingSecretEncrypted) return res.status(400).json({ err: 'Start MFA setup first.' });
+    const secret = decryptSecret(user.mfaPendingSecretEncrypted);
+    if (!verifyTotp(secret, code)) {
+      return res.status(400).json({ err: 'The MFA code is not valid.' });
+    }
+
+    const backupCodes = generateBackupCodes();
+    user.mfaSecretEncrypted = user.mfaPendingSecretEncrypted;
+    user.mfaPendingSecretEncrypted = undefined;
+    user.mfaEnabled = true;
+    user.mfaRecoveryCodeHashes = backupCodes.map(hashRecoveryCode);
+    await user.save();
+
+    await logActivity({
+      user,
+      action: 'mfa_enabled',
+      module: 'auth',
+      recordId: user._id,
+    });
+
+    return res.status(200).json({ backupCodes });
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.post('/admin/mfa/disable', verifyToken, async (req, res) => {
+  try {
+    const code = String(req.body.code || '').trim().toUpperCase();
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'admin') return res.status(404).json({ err: 'Admin user not found.' });
+    if (!user.mfaEnabled || !user.mfaSecretEncrypted) return res.status(400).json({ err: 'MFA is not enabled.' });
+
+    let valid = verifyTotp(decryptSecret(user.mfaSecretEncrypted), code);
+    if (!valid) {
+      const recoveryIndex = (user.mfaRecoveryCodeHashes || []).findIndex((entry) => entry === hashRecoveryCode(code));
+      if (recoveryIndex !== -1) {
+        user.mfaRecoveryCodeHashes.splice(recoveryIndex, 1);
+        valid = true;
+      }
+    }
+
+    if (!valid) return res.status(400).json({ err: 'Invalid MFA code.' });
+
+    user.mfaEnabled = false;
+    user.mfaSecretEncrypted = undefined;
+    user.mfaPendingSecretEncrypted = undefined;
+    user.mfaRecoveryCodeHashes = [];
+    await user.save();
+
+    await logActivity({
+      user,
+      action: 'mfa_disabled',
+      module: 'auth',
+      recordId: user._id,
+    });
+
+    return res.status(200).json({ message: 'MFA disabled.' });
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
 // Get current logged-in user
 router.get('/me', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-hashedPassword');
     if (!user) return res.status(404).json({ err: 'User not found' });
-    res.json({ user });
+    res.json({ user: buildPublicUser(user) });
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
