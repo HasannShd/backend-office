@@ -27,12 +27,7 @@ Staff-facing APIs:
 - `/api/staff-portal/expenses`
 - `/api/staff-portal/clients`
 - `/api/staff-portal/visits`
-- `/api/staff-portal/followups`
-- `/api/staff-portal/quotations`
 - `/api/staff-portal/collections`
-- `/api/staff-portal/stock-requests`
-- `/api/staff-portal/product-demands`
-- `/api/staff-portal/issues`
 - `/api/staff-portal/notifications`
 
 Admin-facing APIs:
@@ -46,12 +41,7 @@ Admin-facing APIs:
 - `/api/admin-portal/expenses`
 - `/api/admin-portal/clients`
 - `/api/admin-portal/visits`
-- `/api/admin-portal/followups`
-- `/api/admin-portal/quotations`
 - `/api/admin-portal/collections`
-- `/api/admin-portal/stock-requests`
-- `/api/admin-portal/product-demands`
-- `/api/admin-portal/issues`
 - `/api/admin-portal/notifications`
 - `/api/admin-portal/activity-logs`
 - `/api/admin-portal/exports/:resource`
@@ -68,12 +58,7 @@ The portal adds these models:
 - `ActivityLog`
 - `Client`
 - `ClientVisit`
-- `FollowUp`
-- `Quotation`
 - `CollectionLog`
-- `StockRequest`
-- `ProductDemand`
-- `IssueReport`
 - `Notification`
 
 ## Environment Setup

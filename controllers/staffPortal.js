@@ -8,12 +8,7 @@ const SalesOrder = require('../models/salesOrder');
 const ExpenseRequest = require('../models/expenseRequest');
 const Client = require('../models/client');
 const ClientVisit = require('../models/clientVisit');
-const FollowUp = require('../models/followUp');
-const Quotation = require('../models/quotation');
 const CollectionLog = require('../models/collectionLog');
-const StockRequest = require('../models/stockRequest');
-const ProductDemand = require('../models/productDemand');
-const IssueReport = require('../models/issueReport');
 const Notification = require('../models/notification');
 
 const requireAuthUser = require('../middleware/require-auth-user');
@@ -21,6 +16,7 @@ const requireRoles = require('../middleware/require-roles');
 const { ok, fail } = require('../utils/respond');
 const { logActivity } = require('../services/activity-log-service');
 const { sendSalesOrderEmail, createTallyBridgePayload } = require('../services/order-notification-service');
+const { toCsv } = require('../utils/csv');
 
 const router = express.Router();
 
@@ -54,15 +50,24 @@ const createNotification = async ({ user, title, message, type = 'info', related
     relatedRecord,
   });
 
+const exportCsv = (res, filename, rows) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  return res.send(toCsv(rows));
+};
+
+const getOwnedClientFilter = (userId) => ({
+  $or: [{ assignedTo: userId }, { createdBy: userId }],
+});
+
 router.use(requireAuthUser, requireRoles('sales_staff'));
 
 router.get('/dashboard', async (req, res, next) => {
   try {
-    const [attendance, schedules, reports, followUps, notifications, recentOrders, recentExpenses] = await Promise.all([
+    const [attendance, schedules, reports, notifications, recentOrders, recentExpenses] = await Promise.all([
       AttendanceLog.findOne(getOwnFilter(req, { date: todayKey() })),
       Schedule.find(getOwnFilter(req, { assignedDate: todayKey() })).sort({ startTime: 1 }).limit(10).populate('client', 'name'),
       DailyReport.find(getOwnFilter(req)).sort({ createdAt: -1 }).limit(3),
-      FollowUp.find(getOwnFilter(req, { status: 'pending' })).sort({ dueDate: 1 }).limit(5).populate('client', 'name'),
       Notification.find({ user: req.user._id, read: false }).sort({ createdAt: -1 }).limit(5),
       SalesOrder.find(getOwnFilter(req)).sort({ createdAt: -1 }).limit(3),
       ExpenseRequest.find(getOwnFilter(req)).sort({ createdAt: -1 }).limit(3),
@@ -80,11 +85,9 @@ router.get('/dashboard', async (req, res, next) => {
           }
         : { checkedIn: false, checkedOut: false },
       schedules,
-      dueFollowUps: followUps,
       notifications,
       quickStats: {
         unreadNotifications: notifications.length,
-        pendingFollowUps: followUps.length,
         recentOrders: recentOrders.length,
         recentExpenses: recentExpenses.length,
       },
@@ -196,12 +199,18 @@ router.post('/attendance/mileage', async (req, res, next) => {
 
     if (mileageWeekStart !== undefined && mileageWeekStart !== '') {
       const value = Number(mileageWeekStart);
-      if (!Number.isNaN(value)) record.mileageWeekStart = value;
+      if (!Number.isNaN(value)) {
+        record.mileageWeekStart = value;
+        record.mileageWeekStartAt = new Date();
+      }
     }
 
     if (mileageWeekEnd !== undefined && mileageWeekEnd !== '') {
       const value = Number(mileageWeekEnd);
-      if (!Number.isNaN(value)) record.mileageWeekEnd = value;
+      if (!Number.isNaN(value)) {
+        record.mileageWeekEnd = value;
+        record.mileageWeekEndAt = new Date();
+      }
     }
 
     if (typeof note === 'string' && note.trim()) {
@@ -306,7 +315,9 @@ router.post('/reports', async (req, res, next) => {
 
 router.get('/orders', async (req, res, next) => {
   try {
-    const orders = await SalesOrder.find(getOwnFilter(req)).sort({ createdAt: -1 }).populate('client', 'name');
+    const orders = await SalesOrder.find(getOwnFilter(req))
+      .sort({ createdAt: -1 })
+      .populate('client', 'name contactPerson phone email location');
     return ok(res, { orders });
   } catch (error) {
     return next(error);
@@ -316,16 +327,31 @@ router.get('/orders', async (req, res, next) => {
 router.post('/orders', async (req, res, next) => {
   try {
     const { client, customerName, companyName, contactPerson, items = [], notes, urgency, deliveryNote } = req.body;
-    if (!customerName || !Array.isArray(items) || !items.length) {
-      return fail(res, 'Customer name and at least one order item are required.', 400);
+    if (!Array.isArray(items) || !items.length) {
+      return fail(res, 'At least one order item is required.', 400);
+    }
+
+    let clientRecord = null;
+    if (client) {
+      if (!isValidObjectId(client)) return fail(res, 'Invalid client id.', 400);
+      clientRecord = await Client.findOne({ _id: client, ...getOwnedClientFilter(req.user._id) });
+      if (!clientRecord) return fail(res, 'Selected client was not found in your client list.', 404);
+    }
+
+    const resolvedCustomerName = String(customerName || clientRecord?.contactPerson || clientRecord?.name || '').trim();
+    const resolvedCompanyName = String(companyName || clientRecord?.name || '').trim();
+    const resolvedContactPerson = String(contactPerson || clientRecord?.contactPerson || '').trim();
+
+    if (!resolvedCustomerName) {
+      return fail(res, 'Customer name is required. Select a client or enter a contact name.', 400);
     }
 
     const order = await SalesOrder.create({
       user: req.user._id,
-      client: isValidObjectId(client) ? client : undefined,
-      customerName,
-      companyName,
-      contactPerson,
+      client: clientRecord?._id,
+      customerName: resolvedCustomerName,
+      companyName: resolvedCompanyName,
+      contactPerson: resolvedContactPerson,
       items,
       notes,
       urgency,
@@ -358,6 +384,35 @@ router.post('/orders', async (req, res, next) => {
     });
 
     return ok(res, { order }, 'Order submitted.', 201);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/orders/export', async (req, res, next) => {
+  try {
+    const orders = await SalesOrder.find(getOwnFilter(req))
+      .sort({ createdAt: -1 })
+      .populate('client', 'name contactPerson phone email location')
+      .lean();
+
+    return exportCsv(
+      res,
+      `staff-orders-${req.user.username || req.user._id}.csv`,
+      orders.map((order) => ({
+        submittedAt: order.createdAt?.toISOString?.() || '',
+        status: order.status || '',
+        clientName: order.client?.name || '',
+        customerName: order.customerName || '',
+        companyName: order.companyName || '',
+        contactPerson: order.contactPerson || '',
+        urgency: order.urgency || '',
+        deliveryNote: order.deliveryNote || '',
+        items: (order.items || []).map((item) => `${item.productName} x${item.quantity}${item.price !== undefined ? ` @ ${item.price}` : ''}`).join(' | '),
+        notes: order.notes || '',
+        emailSent: order.emailSent ? 'Yes' : 'No',
+      }))
+    );
   } catch (error) {
     return next(error);
   }
@@ -408,10 +463,33 @@ router.post('/expenses', async (req, res, next) => {
 
 router.get('/clients', async (req, res, next) => {
   try {
-    const clients = await Client.find({
-      $or: [{ assignedTo: req.user._id }, { createdBy: req.user._id }],
-    }).sort({ updatedAt: -1 });
+    const clients = await Client.find(getOwnedClientFilter(req.user._id)).sort({ updatedAt: -1 });
     return ok(res, { clients });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/clients/export', async (req, res, next) => {
+  try {
+    const clients = await Client.find(getOwnedClientFilter(req.user._id)).sort({ updatedAt: -1 }).lean();
+    return exportCsv(
+      res,
+      `staff-clients-${req.user.username || req.user._id}.csv`,
+      clients.map((client) => ({
+        name: client.name || '',
+        companyType: client.companyType || '',
+        department: client.department || '',
+        contactPerson: client.contactPerson || '',
+        phone: client.phone || '',
+        email: client.email || '',
+        location: client.location || '',
+        address: client.address || '',
+        notes: client.notes || '',
+        createdAt: client.createdAt?.toISOString?.() || '',
+        updatedAt: client.updatedAt?.toISOString?.() || '',
+      }))
+    );
   } catch (error) {
     return next(error);
   }
@@ -455,7 +533,7 @@ router.patch('/clients/:id', async (req, res, next) => {
     if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid client id.', 400);
     const client = await Client.findOne({
       _id: req.params.id,
-      $or: [{ assignedTo: req.user._id }, { createdBy: req.user._id }],
+      ...getOwnedClientFilter(req.user._id),
     });
     if (!client) return fail(res, 'Client not found.', 404);
 
@@ -489,7 +567,7 @@ router.get('/visits', async (req, res, next) => {
 
 router.post('/visits', async (req, res, next) => {
   try {
-    const { client, clientName, visitDate, visitTime, location, metPerson, purpose, discussionSummary, outcome, followUpDate, relatedSchedule } =
+    const { client, clientName, visitDate, visitTime, location, metPerson, purpose, discussionSummary, outcome, relatedSchedule } =
       req.body;
     if (!visitDate || !purpose) return fail(res, 'Visit date and purpose are required.', 400);
 
@@ -504,21 +582,8 @@ router.post('/visits', async (req, res, next) => {
       purpose,
       discussionSummary,
       outcome,
-      followUpDate,
       relatedSchedule: isValidObjectId(relatedSchedule) ? relatedSchedule : undefined,
     });
-
-    if (followUpDate) {
-      await FollowUp.create({
-        user: req.user._id,
-        client: visit.client,
-        clientName: visit.clientName,
-        relatedRecordType: 'visit',
-        relatedRecord: visit._id,
-        dueDate: followUpDate,
-        note: `Follow-up from visit: ${purpose}`,
-      });
-    }
 
     await logActivity({
       user: req.user,
@@ -529,113 +594,6 @@ router.post('/visits', async (req, res, next) => {
     });
 
     return ok(res, { visit }, 'Visit logged.', 201);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.get('/followups', async (req, res, next) => {
-  try {
-    const filters = getOwnFilter(req);
-    if (req.query.status) filters.status = req.query.status;
-    const followUps = await FollowUp.find(filters).sort({ dueDate: 1, createdAt: -1 }).populate('client');
-    return ok(res, { followUps });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.post('/followups', async (req, res, next) => {
-  try {
-    const { client, clientName, relatedRecordType, relatedRecord, dueDate, note } = req.body;
-    if (!dueDate || !note) return fail(res, 'Due date and note are required.', 400);
-
-    const followUp = await FollowUp.create({
-      user: req.user._id,
-      client: isValidObjectId(client) ? client : undefined,
-      clientName,
-      relatedRecordType,
-      relatedRecord,
-      dueDate,
-      note,
-    });
-
-    await logActivity({
-      user: req.user,
-      action: 'follow_up_created',
-      module: 'follow_up',
-      recordId: followUp._id,
-      metadata: { dueDate },
-    });
-
-    return ok(res, { followUp }, 'Follow-up created.', 201);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.patch('/followups/:id', async (req, res, next) => {
-  try {
-    if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid follow-up id.', 400);
-    const followUp = await FollowUp.findOne({ _id: req.params.id, user: req.user._id });
-    if (!followUp) return fail(res, 'Follow-up not found.', 404);
-
-    if (req.body.status) followUp.status = req.body.status;
-    if (req.body.note !== undefined) followUp.note = req.body.note;
-    if (req.body.dueDate) followUp.dueDate = req.body.dueDate;
-    await followUp.save();
-
-    await logActivity({
-      user: req.user,
-      action: 'follow_up_updated',
-      module: 'follow_up',
-      recordId: followUp._id,
-      metadata: { status: followUp.status },
-    });
-
-    return ok(res, { followUp }, 'Follow-up updated.');
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.get('/quotations', async (req, res, next) => {
-  try {
-    const quotations = await Quotation.find(getOwnFilter(req)).sort({ createdAt: -1 }).populate('client');
-    return ok(res, { quotations });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.post('/quotations', async (req, res, next) => {
-  try {
-    const quotation = await Quotation.create({
-      ...req.body,
-      user: req.user._id,
-      client: isValidObjectId(req.body.client) ? req.body.client : undefined,
-    });
-
-    await logActivity({
-      user: req.user,
-      action: 'quotation_created',
-      module: 'quotation',
-      recordId: quotation._id,
-    });
-
-    return ok(res, { quotation }, 'Quotation saved.', 201);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.patch('/quotations/:id', async (req, res, next) => {
-  try {
-    if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid quotation id.', 400);
-    const quotation = await Quotation.findOneAndUpdate({ _id: req.params.id, user: req.user._id }, req.body, { new: true });
-    if (!quotation) return fail(res, 'Quotation not found.', 404);
-    await logActivity({ user: req.user, action: 'quotation_updated', module: 'quotation', recordId: quotation._id });
-    return ok(res, { quotation }, 'Quotation updated.');
   } catch (error) {
     return next(error);
   }
@@ -671,72 +629,6 @@ router.patch('/collections/:id', async (req, res, next) => {
     if (!collection) return fail(res, 'Collection not found.', 404);
     await logActivity({ user: req.user, action: 'collection_updated', module: 'collection', recordId: collection._id });
     return ok(res, { collection }, 'Collection updated.');
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.get('/stock-requests', async (req, res, next) => {
-  try {
-    const requests = await StockRequest.find(getOwnFilter(req)).sort({ createdAt: -1 });
-    return ok(res, { requests });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.post('/stock-requests', async (req, res, next) => {
-  try {
-    const request = await StockRequest.create({ ...req.body, user: req.user._id });
-    await logActivity({ user: req.user, action: 'stock_request_submitted', module: 'stock_request', recordId: request._id });
-    return ok(res, { request }, 'Request submitted.', 201);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.get('/product-demands', async (req, res, next) => {
-  try {
-    const demands = await ProductDemand.find(getOwnFilter(req)).sort({ createdAt: -1 }).populate('client');
-    return ok(res, { demands });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.post('/product-demands', async (req, res, next) => {
-  try {
-    const demand = await ProductDemand.create({
-      ...req.body,
-      user: req.user._id,
-      client: isValidObjectId(req.body.client) ? req.body.client : undefined,
-    });
-    await logActivity({ user: req.user, action: 'product_demand_logged', module: 'product_demand', recordId: demand._id });
-    return ok(res, { demand }, 'Demand logged.', 201);
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.get('/issues', async (req, res, next) => {
-  try {
-    const issues = await IssueReport.find(getOwnFilter(req)).sort({ createdAt: -1 }).populate('client order');
-    return ok(res, { issues });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.post('/issues', async (req, res, next) => {
-  try {
-    const issue = await IssueReport.create({
-      ...req.body,
-      user: req.user._id,
-      client: isValidObjectId(req.body.client) ? req.body.client : undefined,
-      order: isValidObjectId(req.body.order) ? req.body.order : undefined,
-    });
-    await logActivity({ user: req.user, action: 'issue_report_submitted', module: 'issue_report', recordId: issue._id });
-    return ok(res, { issue }, 'Issue reported.', 201);
   } catch (error) {
     return next(error);
   }

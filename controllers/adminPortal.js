@@ -10,12 +10,7 @@ const ExpenseRequest = require('../models/expenseRequest');
 const ActivityLog = require('../models/activityLog');
 const Client = require('../models/client');
 const ClientVisit = require('../models/clientVisit');
-const FollowUp = require('../models/followUp');
-const Quotation = require('../models/quotation');
 const CollectionLog = require('../models/collectionLog');
-const StockRequest = require('../models/stockRequest');
-const ProductDemand = require('../models/productDemand');
-const IssueReport = require('../models/issueReport');
 const Notification = require('../models/notification');
 
 const requireAuthUser = require('../middleware/require-auth-user');
@@ -88,14 +83,13 @@ router.use(requireAuthUser, requireRoles('admin'));
 router.get('/dashboard', async (req, res, next) => {
   try {
     const today = todayKey();
-    const [staffCount, checkedInToday, pendingReports, pendingExpenses, pendingOrders, dueFollowUps, visitsByEmployee, recentActivity] =
+    const [staffCount, checkedInToday, pendingReports, pendingExpenses, pendingOrders, visitsByEmployee, recentActivity] =
       await Promise.all([
         User.countDocuments({ role: 'sales_staff', isActive: true }),
         AttendanceLog.countDocuments({ date: today, checkInTime: { $exists: true, $ne: null } }),
         DailyReport.countDocuments({ date: today }),
         ExpenseRequest.countDocuments({ status: { $in: ['submitted', 'under_review'] } }),
         SalesOrder.countDocuments({ status: { $in: ['submitted', 'reviewed'] } }),
-        FollowUp.countDocuments({ status: 'pending', dueDate: { $lte: today } }),
         ClientVisit.aggregate([
           { $match: { visitDate: today } },
           { $group: { _id: '$user', visits: { $sum: 1 } } },
@@ -115,7 +109,6 @@ router.get('/dashboard', async (req, res, next) => {
         pendingReports,
         pendingExpenses,
         pendingOrders,
-        dueFollowUps,
       },
       visitsByEmployee,
       recentActivity,
@@ -159,13 +152,7 @@ router.get('/staff/:id/summary', async (req, res, next) => {
       lastExpense,
       visitsCount,
       lastVisit,
-      followUpsCount,
-      pendingFollowUps,
-      quotationsCount,
       collectionsCount,
-      requestsCount,
-      demandsCount,
-      issuesCount,
       unreadNotifications,
       recentActivity,
     ] = await Promise.all([
@@ -184,13 +171,7 @@ router.get('/staff/:id/summary', async (req, res, next) => {
       ExpenseRequest.findOne(userFilter).sort({ createdAt: -1 }),
       ClientVisit.countDocuments(userFilter),
       ClientVisit.findOne(userFilter).sort({ visitDate: -1, createdAt: -1 }),
-      FollowUp.countDocuments(userFilter),
-      FollowUp.countDocuments({ ...userFilter, status: 'pending' }),
-      Quotation.countDocuments(userFilter),
       CollectionLog.countDocuments(userFilter),
-      StockRequest.countDocuments(userFilter),
-      ProductDemand.countDocuments(userFilter),
-      IssueReport.countDocuments({ ...userFilter, status: { $nin: ['resolved', 'closed'] } }),
       Notification.countDocuments({ user: staffUser._id, read: false }),
       ActivityLog.find({ user: staffUser._id }).sort({ createdAt: -1 }).limit(12),
     ]);
@@ -208,13 +189,7 @@ router.get('/staff/:id/summary', async (req, res, next) => {
         expensesCount,
         pendingExpenses,
         visitsCount,
-        followUpsCount,
-        pendingFollowUps,
-        quotationsCount,
         collectionsCount,
-        requestsCount,
-        demandsCount,
-        issuesCount,
         unreadNotifications,
       },
       latest: {
@@ -253,12 +228,7 @@ router.get('/staff/:id/report', async (req, res, next) => {
       lastExpense,
       visitsCount,
       lastVisit,
-      pendingFollowUps,
-      quotationsCount,
       collectionsCount,
-      requestsCount,
-      demandsCount,
-      openIssues,
     ] = await Promise.all([
       AttendanceLog.countDocuments(userFilter),
       AttendanceLog.findOne(userFilter).sort({ date: -1, createdAt: -1 }),
@@ -272,12 +242,7 @@ router.get('/staff/:id/report', async (req, res, next) => {
       ExpenseRequest.findOne(userFilter).sort({ createdAt: -1 }),
       ClientVisit.countDocuments(userFilter),
       ClientVisit.findOne(userFilter).sort({ visitDate: -1, createdAt: -1 }),
-      FollowUp.countDocuments({ ...userFilter, status: 'pending' }),
-      Quotation.countDocuments(userFilter),
       CollectionLog.countDocuments(userFilter),
-      StockRequest.countDocuments(userFilter),
-      ProductDemand.countDocuments(userFilter),
-      IssueReport.countDocuments({ ...userFilter, status: { $nin: ['resolved', 'closed'] } }),
     ]);
 
     return exportCsv(res, `staff-report-${staffUser.username || staffUser._id}.csv`, [
@@ -306,12 +271,7 @@ router.get('/staff/:id/report', async (req, res, next) => {
       { field: 'Visits', value: visitsCount },
       { field: 'Latest Visit', value: lastVisit?.purpose || lastVisit?.clientLabel || '-' },
       { field: 'Latest Visit Date', value: lastVisit?.visitDate || '-' },
-      { field: 'Pending Follow-ups', value: pendingFollowUps },
-      { field: 'Quotations', value: quotationsCount },
       { field: 'Collections', value: collectionsCount },
-      { field: 'Requests', value: requestsCount },
-      { field: 'Demand Logs', value: demandsCount },
-      { field: 'Open Issues', value: openIssues },
     ]);
   } catch (error) {
     return next(error);
@@ -561,109 +521,10 @@ router.get('/visits', async (req, res, next) => {
   }
 });
 
-router.get('/followups', async (req, res, next) => {
-  try {
-    const followUps = await FollowUp.find(applyAdminFilters(req)).sort({ dueDate: 1 }).populate('user client', 'name username');
-    return ok(res, { followUps });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.get('/quotations', async (req, res, next) => {
-  try {
-    const quotations = await Quotation.find(applyAdminFilters(req)).sort({ createdAt: -1 }).populate('user client', 'name username');
-    return ok(res, { quotations });
-  } catch (error) {
-    return next(error);
-  }
-});
-
 router.get('/collections', async (req, res, next) => {
   try {
     const collections = await CollectionLog.find(applyAdminFilters(req)).sort({ createdAt: -1 }).populate('user client', 'name username');
     return ok(res, { collections });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.get('/stock-requests', async (req, res, next) => {
-  try {
-    const requests = await StockRequest.find(applyAdminFilters(req)).sort({ createdAt: -1 }).populate('user', 'name username');
-    return ok(res, { requests });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.patch('/stock-requests/:id', async (req, res, next) => {
-  try {
-    if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid request id.', 400);
-    const request = await StockRequest.findById(req.params.id);
-    if (!request) return fail(res, 'Request not found.', 404);
-    ['status', 'adminNote'].forEach((field) => {
-      if (req.body[field] !== undefined) request[field] = req.body[field];
-    });
-    request.reviewedBy = req.user._id;
-    request.reviewedAt = new Date();
-    await request.save();
-
-    await sendUserNotification({
-      user: request.user,
-      title: 'Stock request updated',
-      message: `${request.item} request is now ${request.status}.`,
-      relatedModule: 'stock_request',
-      relatedRecord: request._id,
-    });
-
-    await logActivity({ user: req.user, action: 'stock_request_updated', module: 'stock_request', recordId: request._id });
-    return ok(res, { request }, 'Request updated.');
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.get('/product-demands', async (req, res, next) => {
-  try {
-    const demands = await ProductDemand.find(applyAdminFilters(req)).sort({ createdAt: -1 }).populate('user client', 'name username');
-    return ok(res, { demands });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.get('/issues', async (req, res, next) => {
-  try {
-    const issues = await IssueReport.find(applyAdminFilters(req)).sort({ createdAt: -1 }).populate('user client order', 'name username');
-    return ok(res, { issues });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.patch('/issues/:id', async (req, res, next) => {
-  try {
-    if (!isValidObjectId(req.params.id)) return fail(res, 'Invalid issue id.', 400);
-    const issue = await IssueReport.findById(req.params.id);
-    if (!issue) return fail(res, 'Issue not found.', 404);
-    ['status', 'adminNote'].forEach((field) => {
-      if (req.body[field] !== undefined) issue[field] = req.body[field];
-    });
-    issue.reviewedBy = req.user._id;
-    issue.reviewedAt = new Date();
-    await issue.save();
-
-    await sendUserNotification({
-      user: issue.user,
-      title: 'Issue updated',
-      message: `Issue status is now ${issue.status}.`,
-      relatedModule: 'issue_report',
-      relatedRecord: issue._id,
-    });
-
-    await logActivity({ user: req.user, action: 'issue_updated', module: 'issue_report', recordId: issue._id });
-    return ok(res, { issue }, 'Issue updated.');
   } catch (error) {
     return next(error);
   }
@@ -744,16 +605,6 @@ router.get('/exports/:resource', async (req, res, next) => {
             location: row.location,
             purpose: row.purpose,
             outcome: row.outcome,
-          }))
-        ),
-      followups: async () =>
-        FollowUp.find({}).populate('user', 'name username').lean().then((rows) =>
-          rows.map((row) => ({
-            employee: row.user?.name || row.user?.username || '-',
-            clientName: row.clientName,
-            dueDate: row.dueDate,
-            status: row.status,
-            note: row.note,
           }))
         ),
     };
