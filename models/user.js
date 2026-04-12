@@ -10,6 +10,8 @@ const userSchema = new mongoose.Schema({
   marketingOptIn: { type: Boolean, default: false },
   isActive: { type: Boolean, default: true },
   lastLoginAt: Date,
+  resetPasswordTokenHash: String,
+  resetPasswordExpiresAt: Date,
   address: {
     fullName: String,
     phone: String,
