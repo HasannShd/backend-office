@@ -128,7 +128,7 @@ const signUpHandler = async (req, res) => {
       metadata: { role: user.role },
     });
 
-    res.status(201).json({ user: buildPublicUser(user) });
+    res.status(201).json({ token, user: buildPublicUser(user) });
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
@@ -208,7 +208,7 @@ const signInHandler = async (req, res) => {
       metadata: { role: user.role },
     });
 
-    res.status(200).json({ user: buildPublicUser(user) });
+    res.status(200).json({ token, user: buildPublicUser(user) });
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
@@ -276,7 +276,7 @@ router.post('/admin/mfa/verify-login', async (req, res) => {
       recordId: user._id,
     });
 
-    return res.status(200).json({ user: buildPublicUser(user) });
+    return res.status(200).json({ token, user: buildPublicUser(user) });
   } catch (err) {
     return res.status(500).json({ err: err.message });
   }

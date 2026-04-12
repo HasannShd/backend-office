@@ -63,10 +63,11 @@ const getTokenFromRequest = (req) => {
 
 const buildCookieOptions = (role) => {
   const isProduction = process.env.NODE_ENV === 'production';
+  const sameSite = process.env.AUTH_COOKIE_SAME_SITE || (isProduction ? 'none' : 'lax');
   return {
     httpOnly: true,
     secure: isProduction,
-    sameSite: isProduction ? 'strict' : 'lax',
+    sameSite,
     maxAge: COOKIE_MAX_AGE_MS[role] || COOKIE_MAX_AGE_MS.user,
     path: '/',
   };
