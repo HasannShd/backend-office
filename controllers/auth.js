@@ -6,6 +6,16 @@ const jwt = require('jsonwebtoken');
 
 const User = require('../models/user');
 const { sendMail, isConfigured: isMailerConfigured } = require('../utils/mailer');
+const { logActivity } = require('../services/activity-log-service');
+const {
+  TOKEN_TTLS,
+  clearAuthCookies,
+  clearFailedLoginState,
+  isUserLocked,
+  registerFailedLoginAttempt,
+  setAuthCookie,
+  validatePasswordStrength,
+} = require('../utils/auth-security');
 
 const verifyToken = require('../middleware/verify-token');
 
@@ -39,12 +49,18 @@ const normalizeUsername = (email, username) => {
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 const normalizePhone = (phone) => String(phone || '').trim();
 const hashResetToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
+const signSessionToken = (user) =>
+  jwt.sign({ payload: buildPayload(user) }, process.env.JWT_SECRET, { expiresIn: TOKEN_TTLS[user.role] || TOKEN_TTLS.user });
 
 const signUpHandler = async (req, res) => {
   try {
     const { username, email, phone, password, name, marketingOptIn } = req.body;
     if (!email || !phone || !password) {
       return res.status(400).json({ err: 'Email, phone, and password are required.' });
+    }
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
+      return res.status(400).json({ err: passwordError });
     }
 
     const normalizedEmail = normalizeEmail(email);
@@ -65,13 +81,21 @@ const signUpHandler = async (req, res) => {
       name,
       marketingOptIn: !!marketingOptIn,
       hashedPassword: bcrypt.hashSync(password, saltRounds),
+      passwordChangedAt: new Date(),
     });
 
-    const payload = buildPayload(user);
+    const token = signSessionToken(user);
+    setAuthCookie(res, user, token);
 
-    const token = jwt.sign({ payload }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    await logActivity({
+      user,
+      action: 'sign_up',
+      module: 'auth',
+      recordId: user._id,
+      metadata: { role: user.role },
+    });
 
-    res.status(201).json({ token });
+    res.status(201).json({ user: buildPayload(user) });
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
@@ -87,10 +111,32 @@ const signInHandler = async (req, res) => {
       return res.status(401).json({ err: 'Invalid credentials.' });
     }
 
+    if (isUserLocked(user)) {
+      await logActivity({
+        user,
+        action: 'login_blocked',
+        module: 'auth',
+        recordId: user._id,
+        metadata: { lockedUntil: user.lockedUntil },
+      });
+      return res.status(423).json({ err: 'Too many failed login attempts. Try again later.' });
+    }
+
     const isPasswordCorrect = bcrypt.compareSync(
       password, user.hashedPassword
     );
     if (!isPasswordCorrect) {
+      const locked = await registerFailedLoginAttempt(user);
+      await logActivity({
+        user,
+        action: 'login_failed',
+        module: 'auth',
+        recordId: user._id,
+        metadata: { failedLoginAttempts: user.failedLoginAttempts, locked },
+      });
+      if (locked) {
+        return res.status(423).json({ err: 'Too many failed login attempts. Try again later.' });
+      }
       return res.status(401).json({ err: 'Invalid credentials.' });
     }
 
@@ -98,14 +144,22 @@ const signInHandler = async (req, res) => {
       return res.status(403).json({ err: 'This account has been deactivated.' });
     }
 
-    const payload = buildPayload(user);
+    await clearFailedLoginState(user);
 
-    const token = jwt.sign({ payload }, process.env.JWT_SECRET, { expiresIn: '7d' });
-
+    const token = signSessionToken(user);
+    setAuthCookie(res, user, token);
     user.lastLoginAt = new Date();
     await user.save();
 
-    res.status(200).json({ token });
+    await logActivity({
+      user,
+      action: 'login_success',
+      module: 'auth',
+      recordId: user._id,
+      metadata: { role: user.role },
+    });
+
+    res.status(200).json({ user: buildPayload(user) });
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
@@ -128,6 +182,10 @@ router.post('/admin/forgot-password', async (req, res) => {
     const user = await findUserByIdentifier(identifier);
     if (!user || user.role !== 'admin' || !user.email) {
       return res.status(200).json({ message: 'If an admin account matches, a reset link has been sent.' });
+    }
+
+    if (!isMailerConfigured) {
+      return res.status(503).json({ err: 'Password reset email is not configured on the server.' });
     }
 
     const resetToken = crypto.randomBytes(32).toString('hex');
@@ -166,16 +224,18 @@ router.post('/admin/forgot-password', async (req, res) => {
       </div>
     `;
 
-    if (isMailerConfigured) {
-      await sendMail({ to: user.email, subject, text, html });
-    } else {
-      console.log('[auth] Admin reset link generated (SMTP not configured):', resetLink);
-    }
+    await sendMail({ to: user.email, subject, text, html });
+
+    await logActivity({
+      user,
+      action: 'password_reset_requested',
+      module: 'auth',
+      recordId: user._id,
+      metadata: { role: user.role },
+    });
 
     return res.status(200).json({
-      message: isMailerConfigured
-        ? 'If an admin account matches, a reset link has been sent.'
-        : 'Reset link generated. SMTP is not configured, so check backend logs for the link.',
+      message: 'If an admin account matches, a reset link has been sent.',
     });
   } catch (err) {
     return res.status(500).json({ err: err.message });
@@ -189,8 +249,9 @@ router.post('/admin/reset-password', async (req, res) => {
     if (!token || !password) {
       return res.status(400).json({ err: 'Reset token and new password are required.' });
     }
-    if (password.length < 8) {
-      return res.status(400).json({ err: 'Password must be at least 8 characters.' });
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
+      return res.status(400).json({ err: passwordError });
     }
 
     const user = await User.findOne({
@@ -204,14 +265,33 @@ router.post('/admin/reset-password', async (req, res) => {
     }
 
     user.hashedPassword = bcrypt.hashSync(password, saltRounds);
+    user.passwordChangedAt = new Date();
+    user.failedLoginAttempts = 0;
+    user.lockedUntil = undefined;
+    user.lastFailedLoginAt = undefined;
     user.resetPasswordTokenHash = undefined;
     user.resetPasswordExpiresAt = undefined;
     await user.save();
+
+    clearAuthCookies(res);
+
+    await logActivity({
+      user,
+      action: 'password_reset_completed',
+      module: 'auth',
+      recordId: user._id,
+      metadata: { role: user.role },
+    });
 
     return res.status(200).json({ message: 'Password updated. You can now log in.' });
   } catch (err) {
     return res.status(500).json({ err: err.message });
   }
+});
+
+router.post('/logout', (req, res) => {
+  clearAuthCookies(res);
+  return res.status(200).json({ message: 'Logged out.' });
 });
 
 // Get current logged-in user

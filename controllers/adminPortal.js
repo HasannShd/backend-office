@@ -16,6 +16,7 @@ const requireRoles = require('../middleware/require-roles');
 const { ok, fail } = require('../utils/respond');
 const { logActivity } = require('../services/activity-log-service');
 const { toCsv } = require('../utils/csv');
+const { validatePasswordStrength } = require('../utils/auth-security');
 
 const router = express.Router();
 
@@ -465,6 +466,10 @@ router.post('/staff', async (req, res, next) => {
     if (!username || !email || !phone || !password) {
       return fail(res, 'Username, email, phone, and password are required.', 400);
     }
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
+      return fail(res, passwordError, 400);
+    }
 
     const existing = await User.findOne({
       $or: [{ username: username.trim() }, { email: email.trim().toLowerCase() }, { phone: phone.trim() }],
@@ -476,6 +481,7 @@ router.post('/staff', async (req, res, next) => {
       email: email.trim().toLowerCase(),
       phone: phone.trim(),
       hashedPassword: bcrypt.hashSync(password, 12),
+      passwordChangedAt: new Date(),
       name,
       department,
       role: 'sales_staff',

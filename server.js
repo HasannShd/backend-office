@@ -33,6 +33,8 @@ const port = process.env.PORT || 5000;
 let mongoReady = false;
 let mongoConnectInFlight = false;
 
+app.set('trust proxy', 1);
+
 console.log('Boot config:', {
   hasMongoUri: Boolean(mongoUri),
   hasClientUrl: Boolean(process.env.CLIENT_URL),
@@ -80,11 +82,16 @@ app.use(express.json({ limit: '2mb' }));
 const authLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 20,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 app.use('/api', apiLimiter);
