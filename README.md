@@ -177,6 +177,24 @@ Notes:
 - By default the backup overwrites a single file named `lte-backup-latest.tgz`.
 - Change the name with `BACKUP_FILENAME` if needed.
 
+## Restore From Backup
+
+Restore a `.tgz` backup into MongoDB. This inserts every document from every collection.
+
+Required env:
+- `MONGO_URI`
+- `BACKUP_ARCHIVE` (path to `.tgz`)
+
+Optional:
+- `RESTORE_DROP_EXISTING=true` (delete existing docs before inserting)
+- `RESTORE_BATCH_SIZE=1000`
+
+Example:
+
+```bash
+MONGO_URI="..." BACKUP_ARCHIVE="/path/to/lte-backup-latest.tgz" RESTORE_DROP_EXISTING=true npm run restore:backup
+```
+
 ## Notes For Future Tally Integration
 
 The portal order flow already separates submission from downstream integration. When Tally work starts later, add it behind the existing sales order notification/service layer instead of embedding it directly in the controller.

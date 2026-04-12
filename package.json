@@ -10,7 +10,8 @@
     "migrate:categories": "node scripts/migrateCategoryHierarchy.js",
     "fix:product-spelling": "node scripts/fixProductSpelling.js",
     "fill:category-descriptions": "node scripts/fillCategoryDescriptions.js",
-    "backup:drive": "node scripts/backupToDrive.js"
+    "backup:drive": "node scripts/backupToDrive.js",
+    "restore:backup": "node scripts/restoreFromBackup.js"
   },
   "keywords": [],
   "author": "",
