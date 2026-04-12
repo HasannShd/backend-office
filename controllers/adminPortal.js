@@ -582,7 +582,11 @@ router.patch('/orders/:id', async (req, res, next) => {
 
 router.get('/clients', async (req, res, next) => {
   try {
-    const clients = await Client.find({}).sort({ updatedAt: -1 }).populate('assignedTo createdBy', 'name username');
+    const filters = {};
+    if (req.query.user && isValidObjectId(req.query.user)) {
+      filters.$or = [{ assignedTo: req.query.user }, { createdBy: req.query.user }];
+    }
+    const clients = await Client.find(filters).sort({ updatedAt: -1 }).populate('assignedTo createdBy', 'name username');
     return ok(res, { clients });
   } catch (error) {
     return next(error);
