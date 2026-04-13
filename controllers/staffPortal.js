@@ -205,7 +205,7 @@ router.post('/attendance/mileage', async (req, res, next) => {
       (mileageWeekStart === undefined || mileageWeekStart === '') &&
       (mileageWeekEnd === undefined || mileageWeekEnd === '')
     ) {
-      return fail(res, 'Enter week start or week end mileage.', 400);
+      return fail(res, 'Enter daily start or daily end mileage.', 400);
     }
 
     const date = todayKey();
@@ -247,7 +247,7 @@ router.post('/attendance/mileage', async (req, res, next) => {
       },
     });
 
-    return ok(res, { record }, 'Weekly mileage saved.');
+    return ok(res, { record }, 'Daily mileage saved.');
   } catch (error) {
     return next(error);
   }
