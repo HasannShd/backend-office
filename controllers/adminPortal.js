@@ -10,6 +10,7 @@ const ActivityLog = require('../models/activityLog');
 const Client = require('../models/client');
 const ClientVisit = require('../models/clientVisit');
 const Notification = require('../models/notification');
+const MessageThread = require('../models/messageThread');
 
 const requireAuthUser = require('../middleware/require-auth-user');
 const requireRoles = require('../middleware/require-roles');
@@ -43,6 +44,40 @@ const sendUserNotification = async ({ user, title, message, type = 'info', relat
     relatedModule,
     relatedRecord,
   });
+};
+
+const mapThreadSummary = (thread) => ({
+  _id: thread._id,
+  staffUser: thread.staffUser,
+  updatedAt: thread.updatedAt,
+  lastMessage: thread.messages?.[thread.messages.length - 1]
+    ? {
+        text: thread.messages[thread.messages.length - 1].text || '',
+        attachments: thread.messages[thread.messages.length - 1].attachments || [],
+        senderRole: thread.messages[thread.messages.length - 1].senderRole,
+        createdAt: thread.messages[thread.messages.length - 1].createdAt,
+      }
+    : null,
+  unreadStaffCount: (thread.messages || []).filter((entry) => entry.senderRole === 'sales_staff' && !entry.readByAdmin).length,
+});
+
+const mapThreadDetails = async (thread) => {
+  await thread.populate('staffUser', 'name username email phone department');
+  await thread.populate('messages.sender', 'name username role');
+  return {
+    ...mapThreadSummary(thread),
+    messages: thread.messages.map((entry) => ({
+      _id: entry._id,
+      text: entry.text || '',
+      attachments: entry.attachments || [],
+      senderRole: entry.senderRole,
+      sender: entry.sender,
+      readByAdmin: entry.readByAdmin,
+      readByStaff: entry.readByStaff,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+    })),
+  };
 };
 
 const formatDateTime = (value) => {
@@ -696,6 +731,122 @@ router.get('/exports/:resource', async (req, res, next) => {
       metadata: { resource: req.params.resource, count: rows.length },
     });
     return exportCsv(res, `${req.params.resource}.csv`, rows);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/messages', async (req, res, next) => {
+  try {
+    const threads = await MessageThread.find({})
+      .sort({ updatedAt: -1 })
+      .populate('staffUser', 'name username email phone department')
+      .lean();
+    return ok(res, {
+      threads: threads.map((thread) => ({
+        ...mapThreadSummary(thread),
+        staffUser: thread.staffUser,
+      })),
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/messages/:staffId', async (req, res, next) => {
+  try {
+    if (!isValidObjectId(req.params.staffId)) return fail(res, 'Invalid staff user id.', 400);
+    const staffUser = await User.findOne({ _id: req.params.staffId, role: 'sales_staff' })
+      .select('name username email phone department isActive')
+      .lean();
+    if (!staffUser) return fail(res, 'Staff user not found.', 404);
+
+    let thread = await MessageThread.findOne({ staffUser: req.params.staffId });
+    if (!thread) {
+      thread = await MessageThread.create({ staffUser: req.params.staffId, messages: [] });
+    }
+    const payload = await mapThreadDetails(thread);
+    payload.staffUser = payload.staffUser || staffUser;
+    return ok(res, { thread: payload });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/messages/:staffId', async (req, res, next) => {
+  try {
+    if (!isValidObjectId(req.params.staffId)) return fail(res, 'Invalid staff user id.', 400);
+    const staffUser = await User.findOne({ _id: req.params.staffId, role: 'sales_staff' });
+    if (!staffUser) return fail(res, 'Staff user not found.', 404);
+
+    const text = String(req.body.text || '').trim();
+    const attachments = Array.isArray(req.body.attachments)
+      ? req.body.attachments
+          .filter((entry) => entry?.url)
+          .map((entry) => ({
+            name: String(entry.name || '').trim() || 'Attachment',
+            url: String(entry.url || '').trim(),
+            mimeType: String(entry.mimeType || '').trim(),
+          }))
+      : [];
+
+    if (!text && !attachments.length) {
+      return fail(res, 'Add a message or at least one attachment.', 400);
+    }
+
+    const thread =
+      (await MessageThread.findOne({ staffUser: staffUser._id })) ||
+      (await MessageThread.create({ staffUser: staffUser._id, messages: [] }));
+
+    thread.messages.push({
+      sender: req.user._id,
+      senderRole: 'admin',
+      text,
+      attachments,
+      readByAdmin: true,
+      readByStaff: false,
+    });
+    await thread.save();
+
+    await sendUserNotification({
+      user: staffUser._id,
+      title: 'New office message',
+      message: text || `${attachments.length} attachment(s) sent by admin`,
+      type: 'info',
+      relatedModule: 'messages',
+      relatedRecord: thread._id,
+    });
+
+    await logActivity({
+      user: req.user,
+      action: 'message_sent',
+      module: 'messages',
+      recordId: thread._id,
+      metadata: { toStaffUser: staffUser._id, attachmentCount: attachments.length },
+    });
+
+    return ok(res, { thread: await mapThreadDetails(thread) }, 'Message sent.', 201);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.patch('/messages/:staffId/read', async (req, res, next) => {
+  try {
+    if (!isValidObjectId(req.params.staffId)) return fail(res, 'Invalid staff user id.', 400);
+    const thread = await MessageThread.findOne({ staffUser: req.params.staffId });
+    if (!thread) {
+      return ok(res, { updated: 0 }, 'No messages to mark as read.');
+    }
+    let updated = 0;
+    thread.messages.forEach((entry) => {
+      if (entry.senderRole === 'sales_staff' && !entry.readByAdmin) {
+        entry.readByAdmin = true;
+        updated += 1;
+      }
+    });
+    if (updated) await thread.save();
+    return ok(res, { updated }, 'Messages marked as read.');
   } catch (error) {
     return next(error);
   }

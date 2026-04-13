@@ -7,6 +7,7 @@ const SalesOrder = require('../models/salesOrder');
 const Client = require('../models/client');
 const ClientVisit = require('../models/clientVisit');
 const Notification = require('../models/notification');
+const MessageThread = require('../models/messageThread');
 
 const requireAuthUser = require('../middleware/require-auth-user');
 const requireRoles = require('../middleware/require-roles');
@@ -46,6 +47,27 @@ const createNotification = async ({ user, title, message, type = 'info', related
     relatedModule,
     relatedRecord,
   });
+
+const mapThreadForResponse = async (thread) => {
+  await thread.populate('messages.sender', 'name username role');
+  return {
+    _id: thread._id,
+    staffUser: thread.staffUser,
+    updatedAt: thread.updatedAt,
+    unreadAdminCount: thread.messages.filter((entry) => entry.senderRole === 'admin' && !entry.readByStaff).length,
+    messages: thread.messages.map((entry) => ({
+      _id: entry._id,
+      text: entry.text || '',
+      attachments: entry.attachments || [],
+      senderRole: entry.senderRole,
+      sender: entry.sender,
+      readByAdmin: entry.readByAdmin,
+      readByStaff: entry.readByStaff,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+    })),
+  };
+};
 
 const exportCsv = (res, filename, rows) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -545,6 +567,92 @@ router.patch('/notifications/:id/read', async (req, res, next) => {
     );
     if (!notification) return fail(res, 'Notification not found.', 404);
     return ok(res, { notification }, 'Notification marked as read.');
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/messages', async (req, res, next) => {
+  try {
+    let thread = await MessageThread.findOne({ staffUser: req.user._id });
+    if (!thread) {
+      thread = await MessageThread.create({ staffUser: req.user._id, messages: [] });
+    }
+    return ok(res, { thread: await mapThreadForResponse(thread) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/messages', async (req, res, next) => {
+  try {
+    const text = String(req.body.text || '').trim();
+    const attachments = Array.isArray(req.body.attachments)
+      ? req.body.attachments
+          .filter((entry) => entry?.url)
+          .map((entry) => ({
+            name: String(entry.name || '').trim() || 'Attachment',
+            url: String(entry.url || '').trim(),
+            mimeType: String(entry.mimeType || '').trim(),
+          }))
+      : [];
+
+    if (!text && !attachments.length) {
+      return fail(res, 'Add a message or at least one attachment.', 400);
+    }
+
+    const thread =
+      (await MessageThread.findOne({ staffUser: req.user._id })) ||
+      (await MessageThread.create({ staffUser: req.user._id, messages: [] }));
+
+    thread.messages.push({
+      sender: req.user._id,
+      senderRole: 'sales_staff',
+      text,
+      attachments,
+      readByAdmin: false,
+      readByStaff: true,
+    });
+    await thread.save();
+
+    await createNotification({
+      user: req.user._id,
+      title: 'Message sent to office',
+      message: text || `${attachments.length} attachment(s) sent`,
+      type: 'info',
+      relatedModule: 'messages',
+      relatedRecord: thread._id,
+    });
+
+    await logActivity({
+      user: req.user,
+      action: 'message_sent',
+      module: 'messages',
+      recordId: thread._id,
+      metadata: { attachmentCount: attachments.length },
+    });
+
+    return ok(res, { thread: await mapThreadForResponse(thread) }, 'Message sent.', 201);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.patch('/messages/read', async (req, res, next) => {
+  try {
+    const thread = await MessageThread.findOne({ staffUser: req.user._id });
+    if (!thread) {
+      return ok(res, { updated: 0 }, 'No messages to mark as read.');
+    }
+    let updated = 0;
+    thread.messages.forEach((entry) => {
+      if (entry.senderRole === 'admin' && !entry.readByStaff) {
+        entry.readByStaff = true;
+        updated += 1;
+      }
+    });
+    if (updated) await thread.save();
+    return ok(res, { updated }, 'Messages marked as read.');
   } catch (error) {
     return next(error);
   }
