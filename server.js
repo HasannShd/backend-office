@@ -34,6 +34,7 @@ let mongoReady = false;
 let mongoConnectInFlight = false;
 
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
 
 console.log('Boot config:', {
   hasMongoUri: Boolean(mongoUri),
@@ -129,6 +130,21 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/careers', careersRoutes);
 app.use('/api/staff-portal', staffPortalRoutes);
 app.use('/api/admin-portal', adminPortalRoutes);
+
+app.use('/api', (req, res) => {
+  res.status(404).json({ ok: false, message: 'API route not found.' });
+});
+
+app.use((error, req, res, next) => {
+  console.error('[api]', error);
+  if (res.headersSent) {
+    return next(error);
+  }
+  return res.status(error.status || 500).json({
+    ok: false,
+    message: error.message || 'Internal server error.',
+  });
+});
 
 if (!mongoUri) {
   console.error('Missing required environment variable: MONGO_URI or MONGODB_URI');

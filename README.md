@@ -1,201 +1,207 @@
 # LTE Backend
 
-## Overview
+Express + MongoDB backend for the LTE website, ecommerce flow, and internal staff/admin portal.
 
-This backend now serves three surfaces from the same Express + MongoDB app:
+## What This API Serves
 
-- public LTE website APIs
-- existing product/category/admin management APIs
-- the new internal sales operations portal APIs
+- Public catalog APIs
+- Customer auth, cart, checkout, and order history
+- Admin catalog and website-management APIs
+- Staff operations portal APIs
+- Admin operations portal APIs
+- Cloudinary uploads
+- SMTP email notifications
+- Nightly MongoDB backups to Google Drive via GitHub Actions
 
-The new portal is role-based:
+## Main Route Groups
 
-- `admin`
-- `sales_staff`
+Auth and users:
 
-Customer/public users keep the existing `user` role so the website storefront is not disrupted.
+- `/api/auth`
+- `/api/users`
 
-## Portal API Structure
+Public website and ecommerce:
 
-Staff-facing APIs:
+- `/api/categories`
+- `/api/products`
+- `/api/cart`
+- `/api/orders`
+- `/api/careers`
+
+Staff portal:
 
 - `/api/staff-portal/dashboard`
 - `/api/staff-portal/attendance`
-- `/api/staff-portal/schedules`
 - `/api/staff-portal/reports`
 - `/api/staff-portal/orders`
-- `/api/staff-portal/expenses`
 - `/api/staff-portal/clients`
 - `/api/staff-portal/visits`
-- `/api/staff-portal/collections`
 - `/api/staff-portal/notifications`
+- `/api/staff-portal/messages`
 
-Admin-facing APIs:
+Admin portal:
 
 - `/api/admin-portal/dashboard`
 - `/api/admin-portal/staff`
 - `/api/admin-portal/attendance`
-- `/api/admin-portal/schedules`
 - `/api/admin-portal/reports`
 - `/api/admin-portal/orders`
-- `/api/admin-portal/expenses`
 - `/api/admin-portal/clients`
 - `/api/admin-portal/visits`
-- `/api/admin-portal/collections`
 - `/api/admin-portal/notifications`
 - `/api/admin-portal/activity-logs`
 - `/api/admin-portal/exports/:resource`
+- `/api/admin-portal/messages`
 
-## Portal Data Models
+## Auth Model
 
-The portal adds these models:
+The backend supports 3 auth scopes:
 
+- `user`
+- `sales_staff`
+- `admin`
+
+Admin auth includes:
+
+- password-strength enforcement
+- failed-login lockout
+- TOTP MFA
+- trusted devices
+- password-reset flow
+
+## Core Models
+
+- `User`
+- `Category`
+- `Product`
+- `Cart`
+- `Order`
 - `AttendanceLog`
-- `Schedule`
 - `DailyReport`
 - `SalesOrder`
-- `ExpenseRequest`
-- `ActivityLog`
 - `Client`
 - `ClientVisit`
-- `CollectionLog`
 - `Notification`
+- `MessageThread`
+- `ActivityLog`
 
-## Environment Setup
+Some additional models exist for future expansion, but the routes above are the currently active feature surface.
 
-Copy `.env.example` to `.env` and fill the values:
+## Environment
 
-```bash
-cp .env.example .env
-```
+Copy `.env.example` to `.env`.
 
 Required:
 
 - `MONGO_URI`
 - `JWT_SECRET`
 
-Needed for email workflow:
+Uploads:
+
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
+
+Email:
 
 - `SMTP_HOST`
 - `SMTP_PORT`
 - `SMTP_USER`
 - `SMTP_PASS`
 - `SMTP_FROM`
-- `ATTENTION_NOTIFY_EMAIL`
-- `SALES_ORDER_NOTIFY_EMAIL`
 
-Useful optional inboxes:
+Optional notification inboxes:
 
 - `WEBSITE_ORDER_NOTIFY_EMAIL`
 - `ORDER_NOTIFY_EMAIL`
+- `SALES_ORDER_NOTIFY_EMAIL`
 - `CV_NOTIFY_EMAIL`
 - `CAREERS_NOTIFY_EMAIL`
 - `HR_NOTIFY_EMAIL`
+- `ATTENTION_NOTIFY_EMAIL`
 
-Needed for uploads:
-
-- `CLOUDINARY_CLOUD_NAME`
-- `CLOUDINARY_API_KEY`
-- `CLOUDINARY_API_SECRET`
-
-`MONGODB_URI` is still accepted, but `MONGO_URI` is preferred.
-
-## First Admin Setup
-
-1. Register a normal user from the frontend or directly in MongoDB.
-2. Promote that account:
-
-```bash
-node scripts/promoteAdmin.js <username>
-```
-
-3. Log in at the admin portal.
-
-## Running Locally
+## Run
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Order Email Workflow
+## Tests
 
-Sales staff orders are saved in MongoDB first, then emailed to the company mailbox via Nodemailer.
+```bash
+npm test
+```
 
-Current behavior:
+Current automated coverage is lightweight and focused on critical utility behavior:
 
-- save order
-- send formatted email
-- track `emailSent`, `emailSentAt`, and `emailError`
-- keep `tallySyncStatus` ready for future integration
+- auth token extraction and password validation
+- backup filename and export serialization helpers
 
-Tally is intentionally not implemented yet.
+## Website Order Flow
 
-## Upload Workflow
+- cart is read from MongoDB
+- checkout creates an `Order`
+- order email is sent through SMTP if configured
+- invoice PDFs can be downloaded later
 
-`/api/upload` now supports:
+Tap card payment is not live yet. The endpoint is present, but checkout still returns a pending/not-available response for Tap.
 
-- admin uploads
-- sales staff uploads
-- image files
+## Staff Order Flow
+
+- staff submit sales orders into MongoDB
+- the backend emails the company inbox if SMTP is configured
+- order status history is tracked
+- Tally sync status is reserved for future work, but Tally is not implemented yet
+
+## Uploads
+
+`/api/upload` accepts authenticated admin and staff uploads:
+
+- images
 - PDF files
 
-Current Cloudinary folders:
+Cloudinary folders:
 
 - `LTE-products`
 - `LTE-documents`
 
-## Backups (Google Drive via GitHub Actions)
+## GitHub Backups
 
-This repo includes a nightly backup workflow that exports every MongoDB collection to JSONL,
-bundles it into a `.tgz`, and uploads it to Google Drive.
+The backend repo contains a GitHub Actions workflow at [`.github/workflows/backup-to-drive.yml`](./.github/workflows/backup-to-drive.yml).
 
-Required GitHub Secrets (repo Settings → Secrets and variables → Actions):
+It:
+
+- exports every MongoDB collection to JSONL
+- bundles the export into a `.tgz`
+- optionally encrypts the archive into `.tgz.enc`
+- uploads the latest archive to Google Drive
+
+Required GitHub secrets:
+
 - `MONGO_URI`
 - `GDRIVE_FOLDER_ID`
 
-Use one of these credential methods:
-- OAuth (recommended for personal Drive):
+Google Drive auth, choose one:
+
+- OAuth:
   - `GDRIVE_OAUTH_CLIENT_ID`
   - `GDRIVE_OAUTH_CLIENT_SECRET`
   - `GDRIVE_OAUTH_REFRESH_TOKEN`
-- Service Account (requires Shared Drive):
-  - `GDRIVE_SERVICE_ACCOUNT_JSON` (service account JSON, or base64 of it)
+- Service account:
+  - `GDRIVE_SERVICE_ACCOUNT_JSON`
 
 Optional:
+
 - `BACKUP_ENCRYPTION_KEY`
-  If set, the workflow uploads an encrypted `.tgz.enc` archive.
-  If not set, the workflow uploads a plain `.tgz` archive so nightly backups still run.
 - `BACKUP_FILENAME`
-  Optional stable Google Drive filename. If omitted, the workflow overwrites `lte-backup-latest.tgz`.
+- `BACKUP_PREFIX`
+- `BACKUP_TZ`
 
-The schedule is set to 11:00 PM Bahrain time (20:00 UTC).
+If encryption is enabled, the uploaded filename is automatically normalized to end in `.enc`.
 
-Manual run:
-- GitHub → Actions → "Nightly MongoDB Backup to Google Drive" → Run workflow
-
-Notes:
-- By default the backup overwrites a single file named `lte-backup-latest.tgz`.
-- Change the name with `BACKUP_FILENAME` if needed, but keep it stable if you want one overwritten file only.
-
-## Restore From Backup
-
-Restore a `.tgz` backup into MongoDB. This inserts every document from every collection.
-
-Required env:
-- `MONGO_URI`
-- `BACKUP_ARCHIVE` (path to `.tgz`)
-
-Optional:
-- `RESTORE_DROP_EXISTING=true` (delete existing docs before inserting)
-- `RESTORE_BATCH_SIZE=1000`
-
-Example:
+## Restore
 
 ```bash
-MONGO_URI="..." BACKUP_ARCHIVE="/path/to/lte-backup-latest.tgz" RESTORE_DROP_EXISTING=true npm run restore:backup
+MONGO_URI="..." BACKUP_ARCHIVE="/path/to/archive.tgz" RESTORE_DROP_EXISTING=true npm run restore:backup
 ```
-
-## Notes For Future Tally Integration
-
-The portal order flow already separates submission from downstream integration. When Tally work starts later, add it behind the existing sales order notification/service layer instead of embedding it directly in the controller.

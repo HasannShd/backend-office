@@ -75,6 +75,18 @@ const formatTimestamp = () => {
   return `${dateStamp}-${timeStamp}`;
 };
 
+const getUploadFilename = (archivePath) => {
+  const configured = String(process.env.BACKUP_FILENAME || '').trim();
+  if (configured) {
+    if (archivePath.endsWith('.enc') && !configured.endsWith('.enc')) {
+      return `${configured}.enc`;
+    }
+    return configured;
+  }
+
+  return archivePath.endsWith('.enc') ? 'lte-backup-latest.tgz.enc' : 'lte-backup-latest.tgz';
+};
+
 const toExtendedJson = (value) => {
   if (value === null || value === undefined) return value;
 
@@ -189,7 +201,7 @@ const exportCollections = async (db, outputDir) => {
 const uploadToDrive = async (archivePath, folderId) => {
   const auth = getDriveAuth();
   const drive = google.drive({ version: 'v3', auth });
-  const filename = process.env.BACKUP_FILENAME || 'lte-backup-latest.tgz';
+  const filename = getUploadFilename(archivePath);
 
   const query = [
     `'${folderId}' in parents`,
@@ -283,7 +295,17 @@ const main = async () => {
   }
 };
 
-main().catch((err) => {
-  console.error('[backup]', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('[backup]', err);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  ensureEnv,
+  formatTimestamp,
+  getUploadFilename,
+  isEncryptionEnabled,
+  toExtendedJson,
+};

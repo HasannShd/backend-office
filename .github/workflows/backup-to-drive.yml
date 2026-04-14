@@ -1,5 +1,12 @@
 name: Nightly MongoDB Backup to Google Drive
 
+concurrency:
+  group: nightly-mongodb-backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 on:
   schedule:
     - cron: '0 20 * * *'
@@ -8,6 +15,7 @@ on:
 jobs:
   backup:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       BACKUP_PREFIX: lte-backup
       BACKUP_TZ: Asia/Bahrain
