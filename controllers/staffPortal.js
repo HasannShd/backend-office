@@ -75,6 +75,8 @@ const notifyAdmins = async ({ title, message, type = 'info', relatedModule, rela
   });
 };
 
+const displayStaffName = (user) => String(user?.name || user?.username || 'Staff').trim() || 'Staff';
+
 const mapThreadForResponse = async (thread) => {
   await thread.populate('messages.sender', 'name username role');
   return {
@@ -389,8 +391,8 @@ router.post('/orders', async (req, res, next) => {
     });
 
     await notifyAdmins({
-      title: 'New staff sales order',
-      message: `${req.user.name || req.user.username || 'Staff'} submitted an order for ${order.companyName || order.customerName}.`,
+      title: `New sales order from ${displayStaffName(req.user)}`,
+      message: `${displayStaffName(req.user)} submitted an order for ${order.companyName || order.customerName}.`,
       type: 'info',
       relatedModule: 'sales_order',
       relatedRecord: order._id,
@@ -671,8 +673,8 @@ router.post('/messages', async (req, res, next) => {
     });
 
     await notifyAdmins({
-      title: 'New staff message',
-      message: text || `${req.user.name || req.user.username || 'Staff'} sent ${attachments.length} attachment(s).`,
+      title: `New message from ${displayStaffName(req.user)}`,
+      message: text || `${displayStaffName(req.user)} sent ${attachments.length} attachment(s).`,
       type: 'info',
       relatedModule: 'messages',
       relatedRecord: thread._id,
