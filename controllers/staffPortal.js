@@ -396,7 +396,7 @@ router.post('/orders', async (req, res, next) => {
       type: 'info',
       relatedModule: 'sales_order',
       relatedRecord: order._id,
-      pushUrl: '/admin/orders',
+      pushUrl: `/admin/orders?focus=${encodeURIComponent(String(order._id))}`,
       pushTag: `sales-order-${order._id}`,
       pushData: { orderId: String(order._id) },
     });
@@ -678,7 +678,7 @@ router.post('/messages', async (req, res, next) => {
       type: 'info',
       relatedModule: 'messages',
       relatedRecord: thread._id,
-      pushUrl: '/admin/dashboard',
+      pushUrl: `/admin/messages?staffId=${encodeURIComponent(String(req.user._id))}`,
       pushTag: `staff-message-${thread._id}`,
       pushData: { threadId: String(thread._id), staffUserId: String(req.user._id) },
     });

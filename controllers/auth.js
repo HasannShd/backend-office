@@ -13,6 +13,7 @@ const {
   listPushSubscriptions,
   removePushSubscription,
   upsertPushSubscription,
+  sendPushToUser,
 } = require('../services/push-notification-service');
 const { buildOtpAuthUrl, generateBackupCodes, generateSecret, verifyTotp } = require('../utils/totp');
 const {
@@ -543,6 +544,31 @@ router.post('/admin/push/unsubscribe', verifyToken, async (req, res) => {
       message: removed ? 'Push subscription removed.' : 'No matching push subscription was found.',
       removed,
       subscriptions: listPushSubscriptions(user),
+    });
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.post('/admin/push/test', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'admin') return res.status(404).json({ err: 'Admin user not found.' });
+    if (!isPushConfigured) return res.status(503).json({ err: 'Push notifications are not configured on the server.' });
+    if (!(user.pushSubscriptions || []).length) return res.status(400).json({ err: 'No push-enabled device is registered for this admin.' });
+
+    const result = await sendPushToUser({
+      user,
+      title: 'LTE test notification',
+      body: 'Push delivery is working on this admin device.',
+      url: '/admin/account',
+      tag: `push-test-${Date.now()}`,
+      data: { source: 'admin-push-test' },
+    });
+
+    return res.status(200).json({
+      message: result.sent ? 'Test notification sent.' : 'No push notification was delivered.',
+      result,
     });
   } catch (err) {
     return res.status(500).json({ err: err.message });

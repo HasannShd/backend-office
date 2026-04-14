@@ -142,6 +142,14 @@ const sendPushToUsers = async ({ users = [], payload }) => {
   return { sent, failed, skipped: 0 };
 };
 
+const sendPushToUser = async ({ user, title, body, url, tag, data }) => {
+  if (!user) return { sent: 0, skipped: 1, failed: 0 };
+  return sendPushToUsers({
+    users: [user],
+    payload: buildPayload({ title, body, url, tag, data }),
+  });
+};
+
 const sendPushToAdmins = async ({ title, body, url, tag, data }) => {
   const admins = await User.find({
     role: 'admin',
@@ -165,5 +173,6 @@ module.exports = {
   listPushSubscriptions,
   removePushSubscription,
   sendPushToAdmins,
+  sendPushToUser,
   upsertPushSubscription,
 };
