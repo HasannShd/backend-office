@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { MongoClient } = require('mongodb');
 const { google } = require('googleapis');
 const tar = require('tar');
+const { verifyArchive } = require('./restoreFromBackup');
 
 const requiredEnv = ['MONGO_URI', 'GDRIVE_FOLDER_ID'];
 
@@ -284,6 +285,9 @@ const main = async () => {
     } else {
       console.warn('[backup] BACKUP_ENCRYPTION_KEY is not set. Uploading unencrypted archive.');
     }
+
+    const verifiedCollections = await verifyArchive(finalArchivePath);
+    console.log('[backup] Verified archive collections:', verifiedCollections.length);
 
     const upload = await uploadToDrive(finalArchivePath, folderId);
     console.log('Backup uploaded:', upload);

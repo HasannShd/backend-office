@@ -153,25 +153,85 @@ const restoreCollection = async (db, name, filePath, batchSize, dropExisting) =>
   return count;
 };
 
+const extractArchive = async (archivePath) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lte-restore-'));
+  const archiveToExtract = archivePath.endsWith('.enc')
+    ? path.join(tempDir, 'backup.tgz')
+    : archivePath;
+
+  if (archivePath.endsWith('.enc')) {
+    await decryptArchive(archivePath, archiveToExtract);
+  }
+
+  await tar.x({ file: archiveToExtract, cwd: tempDir });
+
+  return {
+    tempDir,
+    cleanup: () => fs.rmSync(tempDir, { recursive: true, force: true }),
+  };
+};
+
+const verifyArchive = async (archivePath) => {
+  if (!fs.existsSync(archivePath)) {
+    throw new Error(`Backup archive not found: ${archivePath}`);
+  }
+
+  const { tempDir, cleanup } = await extractArchive(archivePath);
+
+  try {
+    const collections = listCollections(tempDir);
+    if (!collections.length) {
+      throw new Error('Backup archive does not contain any collections.');
+    }
+
+    const verification = [];
+
+    for (const name of collections) {
+      const filePath = path.join(tempDir, `${name}.jsonl`);
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`Missing collection export: ${name}.jsonl`);
+      }
+
+      const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+      const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+      let count = 0;
+
+      for await (const line of rl) {
+        if (!line.trim()) continue;
+        parseJsonLine(line);
+        count += 1;
+      }
+
+      verification.push({ name, count });
+    }
+
+    return verification;
+  } finally {
+    cleanup();
+  }
+};
+
 const main = async () => {
   ensureEnv();
 
   const archivePath = process.env.BACKUP_ARCHIVE;
   const dropExisting = String(process.env.RESTORE_DROP_EXISTING || 'false') === 'true';
   const batchSize = Number(process.env.RESTORE_BATCH_SIZE || 1000);
+  const verifyOnly = String(process.env.RESTORE_VERIFY_ONLY || 'false') === 'true';
 
   if (!fs.existsSync(archivePath)) {
     throw new Error(`Backup archive not found: ${archivePath}`);
   }
 
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lte-restore-'));
-  const archiveToExtract = archivePath.endsWith('.enc')
-    ? path.join(tempDir, 'backup.tgz')
-    : archivePath;
-  if (archivePath.endsWith('.enc')) {
-    await decryptArchive(archivePath, archiveToExtract);
+  if (verifyOnly) {
+    const collections = await verifyArchive(archivePath);
+    collections.forEach(({ name, count }) => {
+      console.log(`[verify] ${name}: ${count}`);
+    });
+    return;
   }
-  await tar.x({ file: archiveToExtract, cwd: tempDir });
+
+  const { tempDir, cleanup } = await extractArchive(archivePath);
 
   const client = new MongoClient(process.env.MONGO_URI, {
     maxPoolSize: 2,
@@ -190,11 +250,21 @@ const main = async () => {
     }
   } finally {
     await client.close().catch(() => {});
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    cleanup();
   }
 };
 
-main().catch((err) => {
-  console.error('[restore]', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('[restore]', err);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  ensureEnv,
+  fromExtendedJson,
+  parseJsonLine,
+  listCollections,
+  verifyArchive,
+};

@@ -143,6 +143,7 @@ Current automated coverage is lightweight and focused on critical utility behavi
 
 - auth token extraction and password validation
 - backup filename and export serialization helpers
+- backup archive verification and restore structure checks
 
 ## Website Order Flow
 
@@ -181,7 +182,9 @@ It:
 - exports every MongoDB collection to JSONL
 - bundles the export into a `.tgz`
 - optionally encrypts the archive into `.tgz.enc`
+- verifies the archive can be parsed before upload
 - uploads the latest archive to Google Drive
+- opens a GitHub issue automatically if the workflow fails
 
 Required GitHub secrets:
 
@@ -211,3 +214,13 @@ If encryption is enabled, the uploaded filename is automatically normalized to e
 ```bash
 MONGO_URI="..." BACKUP_ARCHIVE="/path/to/archive.tgz" RESTORE_DROP_EXISTING=true npm run restore:backup
 ```
+
+Verify an archive without writing to MongoDB:
+
+```bash
+MONGO_URI="..." BACKUP_ARCHIVE="/path/to/archive.tgz" npm run restore:verify
+```
+
+## CI
+
+- GitHub Actions now runs `npm test` on pushes to `main` and on pull requests
