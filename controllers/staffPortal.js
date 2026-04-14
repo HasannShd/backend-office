@@ -14,7 +14,9 @@ const requireRoles = require('../middleware/require-roles');
 const { ok, fail } = require('../utils/respond');
 const { logActivity } = require('../services/activity-log-service');
 const { sendSalesOrderEmail, createTallyBridgePayload } = require('../services/order-notification-service');
+const { sendPushToAdmins } = require('../services/push-notification-service');
 const { toCsv } = require('../utils/csv');
+const User = require('../models/user');
 
 const router = express.Router();
 
@@ -47,6 +49,31 @@ const createNotification = async ({ user, title, message, type = 'info', related
     relatedModule,
     relatedRecord,
   });
+
+const notifyAdmins = async ({ title, message, type = 'info', relatedModule, relatedRecord, pushUrl, pushTag, pushData }) => {
+  const admins = await User.find({ role: 'admin', isActive: true }).select('_id');
+  if (admins.length) {
+    await Notification.insertMany(
+      admins.map((admin) => ({
+        user: admin._id,
+        title,
+        message,
+        type,
+        relatedModule,
+        relatedRecord,
+      })),
+      { ordered: false }
+    ).catch(() => {});
+  }
+
+  await sendPushToAdmins({
+    title,
+    body: message,
+    url: pushUrl,
+    tag: pushTag,
+    data: pushData,
+  });
+};
 
 const mapThreadForResponse = async (thread) => {
   await thread.populate('messages.sender', 'name username role');
@@ -361,6 +388,17 @@ router.post('/orders', async (req, res, next) => {
       metadata: { emailSent: order.emailSent },
     });
 
+    await notifyAdmins({
+      title: 'New staff sales order',
+      message: `${req.user.name || req.user.username || 'Staff'} submitted an order for ${order.companyName || order.customerName}.`,
+      type: 'info',
+      relatedModule: 'sales_order',
+      relatedRecord: order._id,
+      pushUrl: '/admin/orders',
+      pushTag: `sales-order-${order._id}`,
+      pushData: { orderId: String(order._id) },
+    });
+
     return ok(res, { order }, 'Order submitted.', 201);
   } catch (error) {
     return next(error);
@@ -630,6 +668,17 @@ router.post('/messages', async (req, res, next) => {
       module: 'messages',
       recordId: thread._id,
       metadata: { attachmentCount: attachments.length },
+    });
+
+    await notifyAdmins({
+      title: 'New staff message',
+      message: text || `${req.user.name || req.user.username || 'Staff'} sent ${attachments.length} attachment(s).`,
+      type: 'info',
+      relatedModule: 'messages',
+      relatedRecord: thread._id,
+      pushUrl: '/admin/dashboard',
+      pushTag: `staff-message-${thread._id}`,
+      pushData: { threadId: String(thread._id), staffUserId: String(req.user._id) },
     });
 
     return ok(res, { thread: await mapThreadForResponse(thread) }, 'Message sent.', 201);

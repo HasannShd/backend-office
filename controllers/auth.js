@@ -7,6 +7,13 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/user');
 const { sendMail, isConfigured: isMailerConfigured } = require('../utils/mailer');
 const { logActivity } = require('../services/activity-log-service');
+const {
+  getPublicPushConfig,
+  isPushConfigured,
+  listPushSubscriptions,
+  removePushSubscription,
+  upsertPushSubscription,
+} = require('../services/push-notification-service');
 const { buildOtpAuthUrl, generateBackupCodes, generateSecret, verifyTotp } = require('../utils/totp');
 const {
   MFA_CHALLENGE_PURPOSE,
@@ -468,11 +475,74 @@ router.get('/admin/mfa/status', verifyToken, async (req, res) => {
       passwordChangedAt: user.passwordChangedAt || null,
       lastLoginAt: user.lastLoginAt || null,
       smtpConfigured: Boolean(isMailerConfigured),
+      pushConfigured: isPushConfigured,
+      pushSubscriptions: listPushSubscriptions(user),
       adminSessionTtl: TOKEN_TTLS.admin,
       recommendedActions: [
         !user.mfaEnabled ? 'Enable MFA for this admin account.' : null,
         !isMailerConfigured ? 'Configure SMTP so password reset works securely.' : null,
+        !isPushConfigured ? 'Configure VAPID keys so browser push notifications can be enabled.' : null,
       ].filter(Boolean),
+    });
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.get('/admin/push/public-key', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('role');
+    if (!user || user.role !== 'admin') return res.status(404).json({ err: 'Admin user not found.' });
+    const config = getPublicPushConfig();
+    return res.status(config.configured ? 200 : 503).json(config);
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.post('/admin/push/subscribe', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'admin') return res.status(404).json({ err: 'Admin user not found.' });
+    if (!isPushConfigured) return res.status(503).json({ err: 'Push notifications are not configured on the server.' });
+
+    await upsertPushSubscription({ user, subscription: req.body.subscription, req });
+
+    await logActivity({
+      user,
+      action: 'push_subscription_registered',
+      module: 'auth',
+      recordId: user._id,
+    });
+
+    return res.status(200).json({
+      message: 'Push notifications enabled.',
+      subscriptions: listPushSubscriptions(user),
+    });
+  } catch (err) {
+    return res.status(err.status || 500).json({ err: err.message });
+  }
+});
+
+router.post('/admin/push/unsubscribe', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'admin') return res.status(404).json({ err: 'Admin user not found.' });
+
+    const removed = await removePushSubscription({ user, endpoint: req.body.endpoint });
+
+    await logActivity({
+      user,
+      action: 'push_subscription_removed',
+      module: 'auth',
+      recordId: user._id,
+      metadata: { removed },
+    });
+
+    return res.status(200).json({
+      message: removed ? 'Push subscription removed.' : 'No matching push subscription was found.',
+      removed,
+      subscriptions: listPushSubscriptions(user),
     });
   } catch (err) {
     return res.status(500).json({ err: err.message });

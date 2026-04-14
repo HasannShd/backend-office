@@ -30,6 +30,22 @@ const userSchema = new mongoose.Schema({
     ],
     default: [],
   },
+  pushSubscriptions: {
+    type: [
+      {
+        endpoint: { type: String, required: true },
+        expirationTime: Number,
+        keys: {
+          p256dh: { type: String, required: true },
+          auth: { type: String, required: true },
+        },
+        label: String,
+        createdAt: { type: Date, default: Date.now },
+        lastUsedAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+  },
   resetPasswordTokenHash: String,
   resetPasswordExpiresAt: Date,
   address: {

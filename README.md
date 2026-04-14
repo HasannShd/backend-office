@@ -102,6 +102,12 @@ Uploads:
 - `CLOUDINARY_API_KEY`
 - `CLOUDINARY_API_SECRET`
 
+Web push notifications:
+
+- `VAPID_PUBLIC_KEY`
+- `VAPID_PRIVATE_KEY`
+- `VAPID_SUBJECT`
+
 Email:
 
 - `SMTP_HOST`
