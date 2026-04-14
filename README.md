@@ -221,6 +221,20 @@ Verify an archive without writing to MongoDB:
 MONGO_URI="..." BACKUP_ARCHIVE="/path/to/archive.tgz" npm run restore:verify
 ```
 
+Easier local/server wrapper using `.env`:
+
+```bash
+npm run restore:file -- --archive /path/to/archive.tgz.enc --verify
+npm run restore:file -- --archive /path/to/archive.tgz.enc --drop-existing
+```
+
+Notes:
+
+- `restore:file` reads `MONGO_URI` and `BACKUP_ENCRYPTION_KEY` from `.env` automatically
+- add `--mongo-uri` or `--encryption-key` only if you want to override `.env`
+- `--verify` checks the archive without writing to MongoDB
+- `--drop-existing` clears the current database collections before restoring
+
 ## CI
 
 - GitHub Actions now runs `npm test` on pushes to `main` and on pull requests

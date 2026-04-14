@@ -12,7 +12,8 @@
     "fill:category-descriptions": "node scripts/fillCategoryDescriptions.js",
     "backup:drive": "node scripts/backupToDrive.js",
     "restore:backup": "node scripts/restoreFromBackup.js",
-    "restore:verify": "RESTORE_VERIFY_ONLY=true node scripts/restoreFromBackup.js"
+    "restore:verify": "RESTORE_VERIFY_ONLY=true node scripts/restoreFromBackup.js",
+    "restore:file": "node scripts/runRestore.js"
   },
   "keywords": [],
   "author": "",
