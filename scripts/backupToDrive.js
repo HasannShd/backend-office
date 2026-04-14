@@ -6,7 +6,7 @@ const { MongoClient } = require('mongodb');
 const { google } = require('googleapis');
 const tar = require('tar');
 
-const requiredEnv = ['MONGO_URI', 'GDRIVE_FOLDER_ID', 'BACKUP_ENCRYPTION_KEY'];
+const requiredEnv = ['MONGO_URI', 'GDRIVE_FOLDER_ID'];
 
 const ensureEnv = () => {
   const missing = requiredEnv.filter((key) => !process.env[key]);
@@ -23,6 +23,8 @@ const ensureEnv = () => {
     throw new Error('Missing Google Drive credentials. Set OAuth secrets or GDRIVE_SERVICE_ACCOUNT_JSON.');
   }
 };
+
+const isEncryptionEnabled = () => Boolean(String(process.env.BACKUP_ENCRYPTION_KEY || '').trim());
 
 const getDriveAuth = () => {
   const oauthClientId = process.env.GDRIVE_OAUTH_CLIENT_ID || '';
@@ -187,7 +189,7 @@ const exportCollections = async (db, outputDir) => {
 const uploadToDrive = async (archivePath, folderId) => {
   const auth = getDriveAuth();
   const drive = google.drive({ version: 'v3', auth });
-  const filename = process.env.BACKUP_FILENAME || 'lte-backup-latest.tgz.enc';
+  const filename = process.env.BACKUP_FILENAME || 'lte-backup-latest.tgz';
 
   const query = [
     `'${folderId}' in parents`,
@@ -264,9 +266,14 @@ const main = async () => {
       ['.']
     );
 
-    await encryptArchive(archivePath, encryptedArchivePath);
+    const finalArchivePath = isEncryptionEnabled() ? encryptedArchivePath : archivePath;
+    if (isEncryptionEnabled()) {
+      await encryptArchive(archivePath, encryptedArchivePath);
+    } else {
+      console.warn('[backup] BACKUP_ENCRYPTION_KEY is not set. Uploading unencrypted archive.');
+    }
 
-    const upload = await uploadToDrive(encryptedArchivePath, folderId);
+    const upload = await uploadToDrive(finalArchivePath, folderId);
     console.log('Backup uploaded:', upload);
   } finally {
     await client.close().catch(() => {});

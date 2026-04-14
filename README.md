@@ -162,6 +162,13 @@ Use one of these credential methods:
 - Service Account (requires Shared Drive):
   - `GDRIVE_SERVICE_ACCOUNT_JSON` (service account JSON, or base64 of it)
 
+Optional:
+- `BACKUP_ENCRYPTION_KEY`
+  If set, the workflow uploads an encrypted `.tgz.enc` archive.
+  If not set, the workflow uploads a plain `.tgz` archive so nightly backups still run.
+- `BACKUP_FILENAME`
+  Optional stable Google Drive filename. If omitted, the workflow overwrites `lte-backup-latest.tgz`.
+
 The schedule is set to 11:00 PM Bahrain time (20:00 UTC).
 
 Manual run:
@@ -169,7 +176,7 @@ Manual run:
 
 Notes:
 - By default the backup overwrites a single file named `lte-backup-latest.tgz`.
-- Change the name with `BACKUP_FILENAME` if needed.
+- Change the name with `BACKUP_FILENAME` if needed, but keep it stable if you want one overwritten file only.
 
 ## Restore From Backup
 
