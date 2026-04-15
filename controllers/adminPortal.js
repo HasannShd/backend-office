@@ -16,6 +16,7 @@ const requireAuthUser = require('../middleware/require-auth-user');
 const requireRoles = require('../middleware/require-roles');
 const { ok, fail } = require('../utils/respond');
 const { logActivity } = require('../services/activity-log-service');
+const { sendPushToUser } = require('../services/push-notification-service');
 const { toCsv } = require('../utils/csv');
 const { validatePasswordStrength } = require('../utils/auth-security');
 
@@ -43,6 +44,29 @@ const sendUserNotification = async ({ user, title, message, type = 'info', relat
     type,
     relatedModule,
     relatedRecord,
+  });
+};
+
+const sendStaffPushIfAvailable = async ({ userId, title, body, url, tag, data }) => {
+  if (!userId) return { sent: 0, skipped: 1, failed: 0 };
+  const staffUser = await User.findOne({
+    _id: userId,
+    role: 'sales_staff',
+    isActive: true,
+    'pushSubscriptions.0': { $exists: true },
+  }).select('pushSubscriptions');
+
+  if (!staffUser) {
+    return { sent: 0, skipped: 1, failed: 0 };
+  }
+
+  return sendPushToUser({
+    user: staffUser,
+    title,
+    body,
+    url,
+    tag,
+    data,
   });
 };
 
@@ -618,6 +642,15 @@ router.patch('/orders/:id', async (req, res, next) => {
       relatedRecord: order._id,
     });
 
+    await sendStaffPushIfAvailable({
+      userId: order.user,
+      title: 'Order status updated',
+      body: `${order.companyName || order.customerName} is now ${order.status}.`,
+      url: `/staff/orders?focus=${encodeURIComponent(String(order._id))}`,
+      tag: `staff-order-${order._id}`,
+      data: { orderId: String(order._id) },
+    });
+
     await logActivity({ user: req.user, action: 'sales_order_updated', module: 'sales_order', recordId: order._id });
     return ok(res, { order }, 'Order updated.');
   } catch (error) {
@@ -815,6 +848,15 @@ router.post('/messages/:staffId', async (req, res, next) => {
       type: 'info',
       relatedModule: 'messages',
       relatedRecord: thread._id,
+    });
+
+    await sendPushToUser({
+      user: staffUser,
+      title: 'New office message',
+      body: text || `${attachments.length} attachment(s) sent by admin`,
+      url: '/staff/messages',
+      tag: `admin-message-${thread._id}`,
+      data: { threadId: String(thread._id), source: 'admin-message' },
     });
 
     await logActivity({

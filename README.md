@@ -27,6 +27,7 @@ Public website and ecommerce:
 - `/api/cart`
 - `/api/orders`
 - `/api/careers`
+- `/api/ai`
 
 Staff portal:
 
@@ -126,6 +127,14 @@ Optional notification inboxes:
 - `HR_NOTIFY_EMAIL`
 - `ATTENTION_NOTIFY_EMAIL`
 
+AI providers:
+
+- `AI_DEFAULT_PROVIDER` (`openai` or `anthropic`)
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_MODEL`
+
 ## Run
 
 ```bash
@@ -144,6 +153,29 @@ Current automated coverage is lightweight and focused on critical utility behavi
 - auth token extraction and password validation
 - backup filename and export serialization helpers
 - backup archive verification and restore structure checks
+- AI request normalization and provider availability reporting
+
+## AI Endpoint
+
+Authenticated users can call:
+
+- `GET /api/ai/providers`
+- `POST /api/ai/generate`
+
+Example request:
+
+```json
+{
+  "provider": "anthropic",
+  "model": "claude-3-5-haiku-20241022",
+  "system": "You are a concise operations assistant.",
+  "prompt": "Summarize today's orders in three bullets.",
+  "temperature": 0.2,
+  "maxTokens": 400
+}
+```
+
+You can also send a `messages` array with `system`, `user`, and `assistant` roles. The backend normalizes that payload and routes it to the selected provider.
 
 ## Website Order Flow
 
@@ -159,6 +191,7 @@ Tap card payment is not live yet. The endpoint is present, but checkout still re
 - staff submit sales orders into MongoDB
 - the backend emails the company inbox if SMTP is configured
 - order status history is tracked
+- staff can receive web push notifications for admin replies and order status updates
 - Tally sync status is reserved for future work, but Tally is not implemented yet
 
 ## Uploads

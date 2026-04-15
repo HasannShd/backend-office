@@ -130,6 +130,12 @@ const buildPublicUser = (user) => ({
   mfaEnabled: Boolean(user.mfaEnabled),
 });
 
+const getStaffPushStatusPayload = (user) => ({
+  pushConfigured: isPushConfigured,
+  pushSubscriptions: listPushSubscriptions(user),
+  pushSessionTtl: TOKEN_TTLS.sales_staff,
+});
+
 const signUpHandler = async (req, res) => {
   try {
     const { username, email, phone, password, name, marketingOptIn } = req.body;
@@ -564,6 +570,102 @@ router.post('/admin/push/test', verifyToken, async (req, res) => {
       url: '/admin/account',
       tag: `push-test-${Date.now()}`,
       data: { source: 'admin-push-test' },
+    });
+
+    return res.status(200).json({
+      message: result.sent ? 'Test notification sent.' : 'No push notification was delivered.',
+      result,
+    });
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.get('/staff/push/status', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'sales_staff') return res.status(404).json({ err: 'Staff user not found.' });
+    return res.status(200).json(getStaffPushStatusPayload(user));
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.get('/staff/push/public-key', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('role');
+    if (!user || user.role !== 'sales_staff') return res.status(404).json({ err: 'Staff user not found.' });
+    const config = getPublicPushConfig();
+    return res.status(config.configured ? 200 : 503).json(config);
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.post('/staff/push/subscribe', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'sales_staff') return res.status(404).json({ err: 'Staff user not found.' });
+    if (!isPushConfigured) return res.status(503).json({ err: 'Push notifications are not configured on the server.' });
+
+    await upsertPushSubscription({ user, subscription: req.body.subscription, req });
+
+    await logActivity({
+      user,
+      action: 'push_subscription_registered',
+      module: 'auth',
+      recordId: user._id,
+      metadata: { role: user.role },
+    });
+
+    return res.status(200).json({
+      message: 'Push notifications enabled.',
+      subscriptions: listPushSubscriptions(user),
+    });
+  } catch (err) {
+    return res.status(err.status || 500).json({ err: err.message });
+  }
+});
+
+router.post('/staff/push/unsubscribe', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'sales_staff') return res.status(404).json({ err: 'Staff user not found.' });
+
+    const removed = await removePushSubscription({ user, endpoint: req.body.endpoint });
+
+    await logActivity({
+      user,
+      action: 'push_subscription_removed',
+      module: 'auth',
+      recordId: user._id,
+      metadata: { removed, role: user.role },
+    });
+
+    return res.status(200).json({
+      message: removed ? 'Push subscription removed.' : 'No matching push subscription was found.',
+      removed,
+      subscriptions: listPushSubscriptions(user),
+    });
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.post('/staff/push/test', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || user.role !== 'sales_staff') return res.status(404).json({ err: 'Staff user not found.' });
+    if (!isPushConfigured) return res.status(503).json({ err: 'Push notifications are not configured on the server.' });
+    if (!(user.pushSubscriptions || []).length) return res.status(400).json({ err: 'No push-enabled device is registered for this staff account.' });
+
+    const result = await sendPushToUser({
+      user,
+      title: 'LTE staff test notification',
+      body: 'Push delivery is working on this staff device.',
+      url: '/staff/account',
+      tag: `staff-push-test-${Date.now()}`,
+      data: { source: 'staff-push-test' },
     });
 
     return res.status(200).json({
