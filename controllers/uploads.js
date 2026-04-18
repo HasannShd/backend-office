@@ -45,6 +45,12 @@ const allowedUploadExtensions = new Set([
   '.heif',
   '.jfif',
   '.pdf',
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+  '.csv',
+  '.txt',
 ]);
 
 const getFileExtension = (filename = '') => {
@@ -62,7 +68,16 @@ const isAllowedUpload = (file) => {
   if (!file) return false;
 
   const mime = String(file.mimetype || '').toLowerCase();
-  if (mime.startsWith('image/') || mime === 'application/pdf') return true;
+  if (
+    mime.startsWith('image/') ||
+    mime === 'application/pdf' ||
+    mime === 'application/msword' ||
+    mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    mime === 'application/vnd.ms-excel' ||
+    mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    mime === 'text/csv' ||
+    mime === 'text/plain'
+  ) return true;
 
   const extension = getFileExtension(file.originalname);
   return allowedUploadExtensions.has(extension);
@@ -79,6 +94,12 @@ const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype, folder = '
   const normalizedMime = String(mimetype || '').toLowerCase();
   const preferredFormat = (() => {
     if (normalizedMime === 'application/pdf' || extension === '.pdf') return 'pdf';
+    if (extension === '.doc') return 'doc';
+    if (extension === '.docx') return 'docx';
+    if (extension === '.xls') return 'xls';
+    if (extension === '.xlsx') return 'xlsx';
+    if (extension === '.csv') return 'csv';
+    if (extension === '.txt') return 'txt';
     if (normalizedMime === 'image/png' || extension === '.png') return 'png';
     if (normalizedMime === 'image/gif' || extension === '.gif') return 'gif';
     if (normalizedMime === 'image/svg+xml' || extension === '.svg') return 'svg';
@@ -92,7 +113,7 @@ const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype, folder = '
   const uploadStream = cloudinaryV2.uploader.upload_stream(
     {
       folder,
-      resource_type: preferredFormat === 'pdf' ? 'raw' : 'image',
+      resource_type: isImageUpload({ originalname, mimetype }) ? 'image' : 'raw',
       public_id: `${publicIdBase}-${Date.now()}`,
       overwrite: false,
       format: preferredFormat,
@@ -115,11 +136,11 @@ router.post('/', requireAuthUser, requireRoles('admin', 'sales_staff'), upload.s
       return res.status(503).json({ message: 'Cloudinary is not configured.' });
     }
     if (!req.file) {
-      return res.status(400).json({ message: 'No image received.' });
+      return res.status(400).json({ message: 'No file received.' });
     }
 
     if (!isAllowedUpload(req.file)) {
-      return res.status(400).json({ message: 'Only image or PDF uploads are allowed.' });
+      return res.status(400).json({ message: 'Only images, PDF files, or office documents are allowed.' });
     }
 
     const result = await uploadBufferToCloudinary(

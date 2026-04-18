@@ -9,6 +9,15 @@ const salesOrderItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const salesOrderAttachmentSchema = new mongoose.Schema(
+  {
+    name: String,
+    url: { type: String, required: true },
+    mimeType: String,
+  },
+  { _id: false }
+);
+
 const salesOrderSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -17,6 +26,7 @@ const salesOrderSchema = new mongoose.Schema(
     companyName: String,
     contactPerson: String,
     items: { type: [salesOrderItemSchema], validate: [(value) => value.length > 0, 'At least one item is required.'] },
+    attachments: { type: [salesOrderAttachmentSchema], default: [] },
     notes: String,
     urgency: { type: String, enum: ['low', 'normal', 'high', 'urgent'], default: 'normal' },
     deliveryNote: String,

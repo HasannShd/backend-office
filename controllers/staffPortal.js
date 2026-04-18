@@ -338,6 +338,16 @@ router.post('/orders', async (req, res, next) => {
       return fail(res, 'At least one order item is required.', 400);
     }
 
+    const attachments = Array.isArray(req.body.attachments)
+      ? req.body.attachments
+          .filter((entry) => entry?.url)
+          .map((entry) => ({
+            name: String(entry.name || '').trim() || 'Attachment',
+            url: String(entry.url || '').trim(),
+            mimeType: String(entry.mimeType || '').trim(),
+          }))
+      : [];
+
     let clientRecord = null;
     if (client) {
       if (!isValidObjectId(client)) return fail(res, 'Invalid client id.', 400);
@@ -360,6 +370,7 @@ router.post('/orders', async (req, res, next) => {
       companyName: resolvedCompanyName,
       contactPerson: resolvedContactPerson,
       items,
+      attachments,
       notes,
       urgency,
       deliveryNote,
@@ -435,6 +446,7 @@ router.get('/orders/export', async (req, res, next) => {
         deliveryNote: order.deliveryNote || '',
         items: (order.items || []).map((item) => `${item.productName} x${item.quantity}${item.price !== undefined ? ` @ ${item.price}` : ''}`).join(' | '),
         notes: order.notes || '',
+        attachments: (order.attachments || []).map((attachment) => attachment.url).join(' | '),
         emailSent: order.emailSent ? 'Yes' : 'No',
       }))
     );

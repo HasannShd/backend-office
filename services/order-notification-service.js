@@ -28,6 +28,7 @@ const buildOrderEmail = ({ order, staff }) => {
     ...lines,
     '',
     `Notes: ${order.notes || '-'}`,
+    `Attachments: ${(order.attachments || []).length ? (order.attachments || []).map((entry) => entry.url).join(' | ') : '-'}`,
   ].join('\n');
 
   const html = `
@@ -52,6 +53,13 @@ const buildOrderEmail = ({ order, staff }) => {
         )
         .join('')}</ul>
       <p><strong>Notes:</strong> ${order.notes || '-'}</p>
+      <p><strong>Attachments:</strong> ${
+        (order.attachments || []).length
+          ? (order.attachments || [])
+              .map((entry) => `<a href="${entry.url}" target="_blank" rel="noreferrer">${entry.name || entry.url}</a>`)
+              .join('<br />')
+          : '-'
+      }</p>
     </div>
   `;
 
