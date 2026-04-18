@@ -631,6 +631,18 @@ router.patch('/notifications/:id/read', async (req, res, next) => {
   }
 });
 
+router.patch('/notifications/read-all', async (req, res, next) => {
+  try {
+    const result = await Notification.updateMany(
+      { user: req.user._id, read: false },
+      { $set: { read: true } }
+    );
+    return ok(res, { updated: result.modifiedCount || 0 }, 'All notifications marked as read.');
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.get('/messages', async (req, res, next) => {
   try {
     let thread = await MessageThread.findOne({ staffUser: req.user._id });
