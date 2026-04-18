@@ -33,6 +33,11 @@ const todayKey = () => {
   return `${values.year}-${values.month}-${values.day}`;
 };
 const getOwnFilter = (req, extra = {}) => ({ user: req.user._id, ...extra });
+const cleanOptionalText = (value) => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+};
 
 const toRecentActivityItem = (record, label) => ({
   id: record._id,
@@ -299,10 +304,10 @@ router.post('/reports', async (req, res, next) => {
     const report = await DailyReport.create({
       user: req.user._id,
       date,
-      summary,
+      summary: String(summary).trim(),
       visits,
       followUpNeeded,
-      notes,
+      notes: cleanOptionalText(notes),
       relatedSchedule: isValidObjectId(relatedSchedule) ? relatedSchedule : undefined,
     });
 
@@ -498,18 +503,18 @@ router.get('/clients/export', async (req, res, next) => {
 router.post('/clients', async (req, res, next) => {
   try {
     const { name, companyType, department, contactPerson, phone, email, address, location, notes } = req.body;
-    if (!name) return fail(res, 'Client name is required.', 400);
+    if (!name || !String(name).trim()) return fail(res, 'Client name is required.', 400);
 
     const client = await Client.create({
-      name,
-      companyType,
-      department,
-      contactPerson,
-      phone,
-      email,
-      address,
-      location,
-      notes,
+      name: String(name).trim(),
+      companyType: cleanOptionalText(companyType),
+      department: cleanOptionalText(department),
+      contactPerson: cleanOptionalText(contactPerson),
+      phone: cleanOptionalText(phone),
+      email: cleanOptionalText(email),
+      address: cleanOptionalText(address),
+      location: cleanOptionalText(location),
+      notes: cleanOptionalText(notes),
       assignedTo: req.user._id,
       createdBy: req.user._id,
     });
@@ -538,8 +543,10 @@ router.patch('/clients/:id', async (req, res, next) => {
     if (!client) return fail(res, 'Client not found.', 404);
 
     ['name', 'companyType', 'department', 'contactPerson', 'phone', 'email', 'address', 'location', 'notes'].forEach((field) => {
-      if (req.body[field] !== undefined) client[field] = req.body[field];
+      if (req.body[field] === undefined) return;
+      client[field] = field === 'name' ? String(req.body[field] || '').trim() : cleanOptionalText(req.body[field]);
     });
+    if (!client.name) return fail(res, 'Client name is required.', 400);
     await client.save();
 
     await logActivity({
@@ -569,19 +576,19 @@ router.post('/visits', async (req, res, next) => {
   try {
     const { client, clientName, visitDate, visitTime, location, metPerson, purpose, discussionSummary, outcome, relatedSchedule } =
       req.body;
-    if (!visitDate || !purpose) return fail(res, 'Visit date and purpose are required.', 400);
+    if (!visitDate || !purpose || !String(purpose).trim()) return fail(res, 'Visit date and purpose are required.', 400);
 
     const visit = await ClientVisit.create({
       user: req.user._id,
       client: isValidObjectId(client) ? client : undefined,
-      clientName,
+      clientName: cleanOptionalText(clientName),
       visitDate,
-      visitTime,
-      location,
-      metPerson,
-      purpose,
-      discussionSummary,
-      outcome,
+      visitTime: cleanOptionalText(visitTime),
+      location: cleanOptionalText(location),
+      metPerson: cleanOptionalText(metPerson),
+      purpose: String(purpose).trim(),
+      discussionSummary: cleanOptionalText(discussionSummary),
+      outcome: cleanOptionalText(outcome),
       relatedSchedule: isValidObjectId(relatedSchedule) ? relatedSchedule : undefined,
     });
 
