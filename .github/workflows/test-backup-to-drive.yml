@@ -1,0 +1,136 @@
+name: Manual Test MongoDB Backup to Google Drive
+
+concurrency:
+  group: manual-test-mongodb-backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      backup_prefix:
+        description: Backup filename prefix for this test run
+        required: false
+        default: lte-test-backup
+      backup_tz:
+        description: Timezone used in the generated backup filename
+        required: false
+        default: Asia/Bahrain
+      notify_feed:
+        description: Post result into the backup status feed issue
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BACKUP_PREFIX: ${{ inputs.backup_prefix }}
+      BACKUP_TZ: ${{ inputs.backup_tz }}
+      BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      MONGO_URI: ${{ secrets.TEST_BACKUP_MONGO_URI }}
+      GDRIVE_FOLDER_ID: ${{ secrets.TEST_GDRIVE_FOLDER_ID }}
+      GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+      GDRIVE_OAUTH_CLIENT_ID: ${{ secrets.GDRIVE_OAUTH_CLIENT_ID }}
+      GDRIVE_OAUTH_CLIENT_SECRET: ${{ secrets.GDRIVE_OAUTH_CLIENT_SECRET }}
+      GDRIVE_OAUTH_REFRESH_TOKEN: ${{ secrets.GDRIVE_OAUTH_REFRESH_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate test backup configuration
+        run: |
+          test -n "$MONGO_URI" || { echo "Missing TEST_BACKUP_MONGO_URI secret."; exit 1; }
+          test -n "$GDRIVE_FOLDER_ID" || { echo "Missing TEST_GDRIVE_FOLDER_ID secret."; exit 1; }
+
+      - name: Run test backup
+        run: node scripts/backupToDrive.js
+
+      - name: Write backup summary
+        if: always()
+        run: |
+          RESULT="${{ job.status }}"
+          {
+            echo "## Test Backup Status"
+            echo ""
+            echo "- Result: ${RESULT}"
+            echo "- Trigger: ${{ github.event_name }}"
+            echo "- Commit: ${{ github.sha }}"
+            echo "- Prefix: ${{ inputs.backup_prefix }}"
+            echo "- Folder secret: TEST_GDRIVE_FOLDER_ID"
+            echo "- Mongo secret: TEST_BACKUP_MONGO_URI"
+            echo "- Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post GitHub backup notification
+        if: always() && inputs.notify_feed
+        continue-on-error: true
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const title = 'Backup status feed';
+            const label = 'backup-status';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const status = '${{ job.status }}';
+            const prefix = '${{ inputs.backup_prefix }}';
+
+            const existing = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              labels: label,
+              per_page: 100,
+            });
+
+            let issue = existing.find((entry) => entry.title === title);
+
+            if (!issue) {
+              const created = await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body: 'This issue is used as a running notification feed for nightly backup results.',
+                labels: [label],
+              });
+              issue = created.data;
+            }
+
+            const headlineMap = {
+              success: 'Manual test backup completed successfully.',
+              failure: 'Manual test backup failed.',
+              cancelled: 'Manual test backup was cancelled.',
+            };
+
+            const body = [
+              headlineMap[status] || `Manual test backup finished with status: ${status}.`,
+              '',
+              `- Result: ${status}`,
+              `- Prefix: ${prefix}`,
+              `- Drive folder secret: TEST_GDRIVE_FOLDER_ID`,
+              `- Mongo secret: TEST_BACKUP_MONGO_URI`,
+              `- Run number: ${context.runNumber}`,
+              `- Event: ${context.eventName}`,
+              `- Commit: ${context.sha}`,
+              `- Run: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: issue.number,
+              body,
+            });
