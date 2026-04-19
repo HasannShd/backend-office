@@ -8,29 +8,30 @@ const tar = require('tar');
 const { verifyArchive } = require('./restoreFromBackup');
 
 const requiredEnv = ['MONGO_URI', 'GDRIVE_FOLDER_ID'];
+const readEnv = (key) => String(process.env[key] || '').trim();
 
 const ensureEnv = () => {
-  const missing = requiredEnv.filter((key) => !process.env[key]);
+  const missing = requiredEnv.filter((key) => !readEnv(key));
   if (missing.length) {
     throw new Error(`Missing required env: ${missing.join(', ')}`);
   }
   const hasOauth = Boolean(
-    process.env.GDRIVE_OAUTH_CLIENT_ID &&
-    process.env.GDRIVE_OAUTH_CLIENT_SECRET &&
-    process.env.GDRIVE_OAUTH_REFRESH_TOKEN
+    readEnv('GDRIVE_OAUTH_CLIENT_ID') &&
+    readEnv('GDRIVE_OAUTH_CLIENT_SECRET') &&
+    readEnv('GDRIVE_OAUTH_REFRESH_TOKEN')
   );
-  const hasServiceAccount = Boolean(process.env.GDRIVE_SERVICE_ACCOUNT_JSON);
+  const hasServiceAccount = Boolean(readEnv('GDRIVE_SERVICE_ACCOUNT_JSON'));
   if (!hasOauth && !hasServiceAccount) {
     throw new Error('Missing Google Drive credentials. Set OAuth secrets or GDRIVE_SERVICE_ACCOUNT_JSON.');
   }
 };
 
-const isEncryptionEnabled = () => Boolean(String(process.env.BACKUP_ENCRYPTION_KEY || '').trim());
+const isEncryptionEnabled = () => Boolean(readEnv('BACKUP_ENCRYPTION_KEY'));
 
 const getDriveAuth = () => {
-  const oauthClientId = process.env.GDRIVE_OAUTH_CLIENT_ID || '';
-  const oauthClientSecret = process.env.GDRIVE_OAUTH_CLIENT_SECRET || '';
-  const oauthRefreshToken = process.env.GDRIVE_OAUTH_REFRESH_TOKEN || '';
+  const oauthClientId = readEnv('GDRIVE_OAUTH_CLIENT_ID');
+  const oauthClientSecret = readEnv('GDRIVE_OAUTH_CLIENT_SECRET');
+  const oauthRefreshToken = readEnv('GDRIVE_OAUTH_REFRESH_TOKEN');
 
   if (oauthClientId && oauthClientSecret && oauthRefreshToken) {
     const oauth = new google.auth.OAuth2(oauthClientId, oauthClientSecret);
@@ -38,8 +39,7 @@ const getDriveAuth = () => {
     return oauth;
   }
 
-  const raw = process.env.GDRIVE_SERVICE_ACCOUNT_JSON || '';
-  const trimmed = raw.trim();
+  const trimmed = readEnv('GDRIVE_SERVICE_ACCOUNT_JSON');
   if (!trimmed) {
     throw new Error('Provide OAuth credentials or GDRIVE_SERVICE_ACCOUNT_JSON.');
   }
@@ -77,7 +77,7 @@ const formatTimestamp = () => {
 };
 
 const getUploadFilename = (archivePath) => {
-  const configured = String(process.env.BACKUP_FILENAME || '').trim();
+  const configured = readEnv('BACKUP_FILENAME');
   if (configured) {
     if (archivePath.endsWith('.enc') && !configured.endsWith('.enc')) {
       return `${configured}.enc`;
@@ -89,7 +89,7 @@ const getUploadFilename = (archivePath) => {
 };
 
 const getLatestAliasFilename = (archivePath) => {
-  const configured = String(process.env.BACKUP_LATEST_ALIAS || '').trim();
+  const configured = readEnv('BACKUP_LATEST_ALIAS');
   if (!configured) return '';
   if (archivePath.endsWith('.enc') && !configured.endsWith('.enc')) {
     return `${configured}.enc`;
@@ -103,7 +103,7 @@ const getMetadataFilename = (archivePath) => {
 };
 
 const getMetadataAliasFilename = () => {
-  const configured = String(process.env.BACKUP_METADATA_ALIAS || '').trim();
+  const configured = readEnv('BACKUP_METADATA_ALIAS');
   return configured || '';
 };
 
@@ -168,7 +168,7 @@ const toExtendedJson = (value) => {
 
 const stringifyDoc = (doc) => JSON.stringify(toExtendedJson(doc));
 const getEncryptionKey = () =>
-  crypto.createHash('sha256').update(String(process.env.BACKUP_ENCRYPTION_KEY || '')).digest();
+  crypto.createHash('sha256').update(readEnv('BACKUP_ENCRYPTION_KEY')).digest();
 
 const encryptArchive = async (sourcePath, targetPath) => {
   const iv = crypto.randomBytes(12);
@@ -298,14 +298,14 @@ const uploadMetadataToDrive = async (metadataPath, archivePath, folderId) => {
 const main = async () => {
   ensureEnv();
 
-  const prefix = process.env.BACKUP_PREFIX || 'lte-backup';
+  const prefix = readEnv('BACKUP_PREFIX') || 'lte-backup';
   const timestamp = formatTimestamp();
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
   const archivePath = path.join(os.tmpdir(), `${prefix}-${timestamp}.tgz`);
   const encryptedArchivePath = `${archivePath}.enc`;
   const metadataPath = path.join(os.tmpdir(), `${prefix}-${timestamp}.metadata.json`);
-  const mongoUri = process.env.MONGO_URI;
-  const folderId = process.env.GDRIVE_FOLDER_ID;
+  const mongoUri = readEnv('MONGO_URI');
+  const folderId = readEnv('GDRIVE_FOLDER_ID');
 
   const client = new MongoClient(mongoUri, {
     maxPoolSize: 2,
