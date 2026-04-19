@@ -42,19 +42,22 @@ jobs:
       - name: Run backup
         run: node scripts/backupToDrive.js
 
-      - name: Write success summary
-        if: success()
+      - name: Write backup summary
+        if: always()
         run: |
+          RESULT="${{ job.status }}"
           {
             echo "## Backup Status"
             echo ""
-            echo "- Result: success"
+            echo "- Result: ${RESULT}"
             echo "- Trigger: ${{ github.event_name }}"
             echo "- Commit: ${{ github.sha }}"
+            echo "- Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Post GitHub success notification
-        if: success()
+      - name: Post GitHub backup notification
+        if: always()
+        continue-on-error: true
         uses: actions/github-script@v8
         with:
           script: |
@@ -62,6 +65,7 @@ jobs:
             const label = 'backup-status';
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+            const status = '${{ job.status }}';
 
             const existing = await github.paginate(github.rest.issues.listForRepo, {
               owner,
@@ -84,56 +88,16 @@ jobs:
               issue = created.data;
             }
 
-            const body = [
-              'Backup completed successfully.',
-              '',
-              `- Run number: ${context.runNumber}`,
-              `- Event: ${context.eventName}`,
-              `- Commit: ${context.sha}`,
-              `- Run: https://github.com/${owner}/${repo}/actions/runs/${context.runId}`,
-            ].join('\n');
-
-            await github.rest.issues.createComment({
-              owner,
-              repo,
-              issue_number: issue.number,
-              body,
-            });
-
-      - name: Open incident issue on failure
-        if: failure()
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const title = 'Backup status feed';
-            const label = 'backup-status';
-
-            const existing = await github.paginate(github.rest.issues.listForRepo, {
-              owner,
-              repo,
-              state: 'open',
-              labels: label,
-              per_page: 100,
-            });
-
-            let issue = existing.find((entry) => entry.title === title);
-
-            if (!issue) {
-              const created = await github.rest.issues.create({
-                owner,
-                repo,
-                title,
-                body: 'This issue is used as a running notification feed for nightly backup results.',
-                labels: [label],
-              });
-              issue = created.data;
-            }
+            const headlineMap = {
+              success: 'Backup completed successfully.',
+              failure: 'Backup workflow failed.',
+              cancelled: 'Backup workflow was cancelled.',
+            };
 
             const body = [
-              'Backup workflow failed.',
+              headlineMap[status] || `Backup workflow finished with status: ${status}.`,
               '',
+              `- Result: ${status}`,
               `- Run number: ${context.runNumber}`,
               `- Event: ${context.eventName}`,
               `- Commit: ${context.sha}`,
