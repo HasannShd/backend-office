@@ -13,7 +13,8 @@
     "backup:drive": "node scripts/backupToDrive.js",
     "restore:backup": "node scripts/restoreFromBackup.js",
     "restore:verify": "RESTORE_VERIFY_ONLY=true node scripts/restoreFromBackup.js",
-    "restore:file": "node scripts/runRestore.js"
+    "restore:file": "node scripts/runRestore.js",
+    "import:full-export": "node scripts/runImportFullRecoveryExport.js"
   },
   "keywords": [],
   "author": "",

@@ -23,6 +23,7 @@ const { logActivity } = require('../services/activity-log-service');
 const { sendPushToUser } = require('../services/push-notification-service');
 const { toCsv } = require('../utils/csv');
 const { validatePasswordStrength } = require('../utils/auth-security');
+const { toExtendedJson } = require('../scripts/backupToDrive');
 
 const router = express.Router();
 
@@ -567,6 +568,32 @@ const buildFullExportWorkbook = async () => {
   );
 
   return workbook;
+};
+
+const buildFullRecoveryExportPayload = async () => {
+  const db = mongoose.connection.db;
+  if (!db) {
+    throw new Error('Database connection is not ready.');
+  }
+
+  const collections = await db.collections();
+  const exportedCollections = [];
+
+  for (const collection of collections.sort((left, right) => left.collectionName.localeCompare(right.collectionName))) {
+    const documents = await collection.find({}).toArray();
+    exportedCollections.push({
+      name: collection.collectionName,
+      count: documents.length,
+      documents: documents.map((document) => toExtendedJson(document)),
+    });
+  }
+
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    database: db.databaseName,
+    collections: exportedCollections,
+  };
 };
 
 const buildStaffReportData = async (staffUser, selectedDate) => {
@@ -1203,6 +1230,26 @@ router.get('/full-export', async (req, res, next) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="lte-full-export-${timestamp}.xlsx"`);
     return res.status(200).send(buffer);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/full-recovery-export', async (req, res, next) => {
+  try {
+    const payload = await buildFullRecoveryExportPayload();
+    const timestamp = formatDateOnly(new Date()).replace(/-/g, '');
+
+    await logActivity({
+      user: req.user,
+      action: 'admin_full_recovery_export_downloaded',
+      module: 'export',
+      metadata: { format: 'json', collections: payload.collections.length },
+    });
+
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="lte-full-recovery-export-${timestamp}.json"`);
+    return res.status(200).send(JSON.stringify(payload, null, 2));
   } catch (error) {
     return next(error);
   }
