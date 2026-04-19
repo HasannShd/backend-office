@@ -5,6 +5,8 @@ const { ObjectId } = require('mongodb');
 const {
   getUploadFilename,
   getLatestAliasFilename,
+  getMetadataFilename,
+  getMetadataAliasFilename,
   toExtendedJson,
 } = require('../scripts/backupToDrive');
 
@@ -49,6 +51,23 @@ test('getLatestAliasFilename honors encrypted extension when configured', () => 
 
   if (typeof original === 'string') process.env.BACKUP_LATEST_ALIAS = original;
   else delete process.env.BACKUP_LATEST_ALIAS;
+});
+
+test('getMetadataFilename maps archive to readable metadata file', () => {
+  assert.equal(
+    getMetadataFilename('/tmp/lte-backup-2026-04-19-230000.tgz.enc'),
+    'lte-backup-2026-04-19-230000.metadata.json'
+  );
+});
+
+test('getMetadataAliasFilename returns configured alias', () => {
+  const original = process.env.BACKUP_METADATA_ALIAS;
+  process.env.BACKUP_METADATA_ALIAS = 'lte-backup-latest.metadata.json';
+
+  assert.equal(getMetadataAliasFilename(), 'lte-backup-latest.metadata.json');
+
+  if (typeof original === 'string') process.env.BACKUP_METADATA_ALIAS = original;
+  else delete process.env.BACKUP_METADATA_ALIAS;
 });
 
 test('toExtendedJson serializes ObjectId and Date values', () => {

@@ -97,6 +97,16 @@ const getLatestAliasFilename = (archivePath) => {
   return configured;
 };
 
+const getMetadataFilename = (archivePath) => {
+  const baseName = path.basename(archivePath).replace(/\.enc$/i, '').replace(/\.tgz$/i, '');
+  return `${baseName}.metadata.json`;
+};
+
+const getMetadataAliasFilename = () => {
+  const configured = String(process.env.BACKUP_METADATA_ALIAS || '').trim();
+  return configured || '';
+};
+
 const toExtendedJson = (value) => {
   if (value === null || value === undefined) return value;
 
@@ -270,6 +280,21 @@ const uploadToDrive = async (archivePath, folderId) => {
   return uploaded;
 };
 
+const uploadMetadataToDrive = async (metadataPath, archivePath, folderId) => {
+  const auth = getDriveAuth();
+  const drive = google.drive({ version: 'v3', auth });
+  const filename = getMetadataFilename(archivePath);
+  const latestAlias = getMetadataAliasFilename();
+
+  const uploaded = await upsertDriveFile(drive, metadataPath, folderId, filename);
+
+  if (latestAlias && latestAlias !== filename) {
+    await upsertDriveFile(drive, metadataPath, folderId, latestAlias);
+  }
+
+  return uploaded;
+};
+
 const main = async () => {
   ensureEnv();
 
@@ -278,6 +303,7 @@ const main = async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
   const archivePath = path.join(os.tmpdir(), `${prefix}-${timestamp}.tgz`);
   const encryptedArchivePath = `${archivePath}.enc`;
+  const metadataPath = path.join(os.tmpdir(), `${prefix}-${timestamp}.metadata.json`);
   const mongoUri = process.env.MONGO_URI;
   const folderId = process.env.GDRIVE_FOLDER_ID;
 
@@ -296,6 +322,7 @@ const main = async () => {
       collections,
     };
     fs.writeFileSync(path.join(tempDir, 'metadata.json'), JSON.stringify(meta, null, 2));
+    fs.writeFileSync(metadataPath, JSON.stringify(meta, null, 2));
 
     await tar.c(
       { gzip: true, file: archivePath, cwd: tempDir },
@@ -314,11 +341,14 @@ const main = async () => {
 
     const upload = await uploadToDrive(finalArchivePath, folderId);
     console.log('Backup uploaded:', upload);
+    const metadataUpload = await uploadMetadataToDrive(metadataPath, finalArchivePath, folderId);
+    console.log('Backup metadata uploaded:', metadataUpload);
   } finally {
     await client.close().catch(() => {});
     fs.rmSync(tempDir, { recursive: true, force: true });
     fs.rmSync(archivePath, { force: true });
     fs.rmSync(encryptedArchivePath, { force: true });
+    fs.rmSync(metadataPath, { force: true });
   }
 };
 
@@ -334,6 +364,8 @@ module.exports = {
   formatTimestamp,
   getUploadFilename,
   getLatestAliasFilename,
+  getMetadataFilename,
+  getMetadataAliasFilename,
   isEncryptionEnabled,
   toExtendedJson,
 };

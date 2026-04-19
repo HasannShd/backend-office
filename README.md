@@ -216,7 +216,8 @@ It:
 - bundles the export into a `.tgz`
 - optionally encrypts the archive into `.tgz.enc`
 - verifies the archive can be parsed before upload
-- uploads the latest archive to Google Drive
+- uploads a timestamped archive to Google Drive
+- uploads a readable `.metadata.json` file alongside each backup
 - opens a GitHub issue automatically if the workflow fails
 
 Required GitHub secrets:
@@ -237,10 +238,18 @@ Optional:
 
 - `BACKUP_ENCRYPTION_KEY`
 - `BACKUP_FILENAME`
+- `BACKUP_LATEST_ALIAS`
+- `BACKUP_METADATA_ALIAS`
 - `BACKUP_PREFIX`
 - `BACKUP_TZ`
 
 If encryption is enabled, the uploaded filename is automatically normalized to end in `.enc`.
+
+Google Drive will not preview `.tgz` or `.tgz.enc` archives directly. Use the uploaded `.metadata.json` file for a readable backup summary, then restore or verify the archive with the scripts below.
+
+Full guide:
+
+- [`BACKUP-RESTORE.md`](./BACKUP-RESTORE.md)
 
 ## Restore
 
