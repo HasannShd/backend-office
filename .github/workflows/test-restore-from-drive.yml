@@ -42,7 +42,6 @@ jobs:
       GDRIVE_OAUTH_CLIENT_SECRET: ${{ secrets.GDRIVE_OAUTH_CLIENT_SECRET }}
       GDRIVE_OAUTH_REFRESH_TOKEN: ${{ secrets.GDRIVE_OAUTH_REFRESH_TOKEN }}
       RESTORE_TEST_MONGO_URI: ${{ secrets.RESTORE_TEST_MONGO_URI }}
-      BACKUP_DOWNLOAD_DIR: ${{ runner.temp }}/restore-test-backup
       BACKUP_FILENAME: ${{ inputs.backup_filename }}
       BACKUP_PREFIX: ${{ inputs.backup_prefix }}
     steps:
@@ -65,6 +64,7 @@ jobs:
       - name: Download backup archive from Drive
         id: download
         run: |
+          export BACKUP_DOWNLOAD_DIR="$RUNNER_TEMP/restore-test-backup"
           node scripts/downloadBackupFromDrive.js | tee "$RUNNER_TEMP/download-backup.log"
           grep '^BACKUP_' "$RUNNER_TEMP/download-backup.log" >> "$GITHUB_ENV"
 
