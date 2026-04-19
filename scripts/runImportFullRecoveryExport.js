@@ -15,10 +15,11 @@ const hasFlag = (flag) => args.includes(flag);
 const filePath = readFlagValue('--file');
 const mongoUri = readFlagValue('--mongo-uri') || process.env.MONGO_URI || '';
 const batchSize = readFlagValue('--batch-size') || process.env.IMPORT_BATCH_SIZE || '';
+const database = readFlagValue('--database') || process.env.IMPORT_DATABASE || '';
 const dropExisting = hasFlag('--drop-existing');
 
 if (!filePath) {
-  console.error('Usage: npm run import:full-export -- --file /path/to/lte-full-recovery-export.json [--drop-existing] [--mongo-uri ...] [--batch-size ...]');
+  console.error('Usage: npm run import:full-export -- --file /path/to/lte-full-recovery-export.json [--drop-existing] [--mongo-uri ...] [--database ...] [--batch-size ...]');
   process.exit(1);
 }
 
@@ -35,6 +36,10 @@ const env = {
 
 if (batchSize) {
   env.IMPORT_BATCH_SIZE = batchSize;
+}
+
+if (database) {
+  env.IMPORT_DATABASE = database;
 }
 
 if (dropExisting) {

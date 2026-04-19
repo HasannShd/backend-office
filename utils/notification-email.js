@@ -47,7 +47,7 @@ const renderBullets = (items = []) => {
 
   return `
     <ul style="margin:0 0 18px; padding-left:20px; color:#1f2d3d;">
-      ${safeItems.map((item) => `<li style="margin:0 0 8px;">${item}</li>`).join('')}
+      ${safeItems.map((item) => `<li style="margin:0 0 8px;">${escapeHtml(item)}</li>`).join('')}
     </ul>
   `;
 };

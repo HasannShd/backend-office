@@ -48,6 +48,7 @@ const main = async () => {
   const payload = loadPayload(readEnv('FULL_EXPORT_FILE'));
   const dropExisting = readEnv('IMPORT_DROP_EXISTING') === 'true';
   const batchSize = Number(readEnv('IMPORT_BATCH_SIZE') || 500);
+  const targetDatabase = readEnv('IMPORT_DATABASE');
   const client = new MongoClient(readEnv('MONGO_URI'), {
     maxPoolSize: 2,
     serverSelectionTimeoutMS: 20000,
@@ -55,7 +56,7 @@ const main = async () => {
 
   try {
     await client.connect();
-    const db = client.db(payload.database || undefined);
+    const db = targetDatabase ? client.db(targetDatabase) : client.db();
 
     for (const collection of payload.collections) {
       const imported = await importCollection(db, collection, dropExisting, batchSize);
