@@ -6,11 +6,15 @@ const User = require('../models/user');
 const AttendanceLog = require('../models/attendanceLog');
 const DailyReport = require('../models/dailyReport');
 const SalesOrder = require('../models/salesOrder');
+const Order = require('../models/order');
 const ActivityLog = require('../models/activityLog');
 const Client = require('../models/client');
 const ClientVisit = require('../models/clientVisit');
 const Notification = require('../models/notification');
 const MessageThread = require('../models/messageThread');
+const Product = require('../models/product');
+const Category = require('../models/category');
+const Schedule = require('../models/schedule');
 
 const requireAuthUser = require('../middleware/require-auth-user');
 const requireRoles = require('../middleware/require-roles');
@@ -19,6 +23,7 @@ const { logActivity } = require('../services/activity-log-service');
 const { sendPushToUser } = require('../services/push-notification-service');
 const { toCsv } = require('../utils/csv');
 const { validatePasswordStrength } = require('../utils/auth-security');
+const { toExtendedJson } = require('../scripts/backupToDrive');
 
 const router = express.Router();
 
@@ -149,6 +154,446 @@ const autoFitWorksheet = (worksheet) => {
     });
     column.width = maxLength;
   });
+};
+
+const isoDate = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+};
+
+const joinParts = (parts, separator = ' | ') =>
+  parts
+    .map((part) => trimText(part))
+    .filter(Boolean)
+    .join(separator);
+
+const addWorksheet = (workbook, name, rows) => {
+  const sheet = workbook.addWorksheet(name);
+  const headers = Object.keys(rows[0] || {});
+  sheet.columns = headers.map((header) => ({
+    header,
+    key: header,
+    width: Math.min(Math.max(header.length + 4, 14), 40),
+  }));
+  if (rows.length) {
+    sheet.addRows(rows);
+  }
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  autoFitWorksheet(sheet);
+  return sheet;
+};
+
+const buildFullExportWorkbook = async () => {
+  const [
+    users,
+    websiteOrders,
+    categories,
+    products,
+    attendanceLogs,
+    dailyReports,
+    salesOrders,
+    clients,
+    clientVisits,
+    schedules,
+    notifications,
+    messageThreads,
+    activityLogs,
+  ] = await Promise.all([
+    User.find({})
+      .select('-hashedPassword -resetPasswordTokenHash -resetPasswordExpiresAt -mfaSecretEncrypted -mfaPendingSecretEncrypted -mfaRecoveryCodeHashes -trustedDevices.tokenHash -pushSubscriptions.keys.auth -pushSubscriptions.keys.p256dh')
+      .sort({ role: 1, createdAt: -1 })
+      .lean(),
+    Order.find({})
+      .sort({ createdAt: -1 })
+      .populate('user', 'name username email phone')
+      .lean(),
+    Category.find({})
+      .populate('parent', 'name slug')
+      .sort({ sortOrder: 1, name: 1 })
+      .lean(),
+    Product.find({})
+      .populate({
+        path: 'categorySlug',
+        select: 'name slug parent',
+        populate: { path: 'parent', select: 'name slug' },
+      })
+      .sort({ name: 1 })
+      .lean(),
+    AttendanceLog.find({})
+      .sort({ date: -1, createdAt: -1 })
+      .populate('user', 'name username department')
+      .lean(),
+    DailyReport.find({})
+      .sort({ date: -1, createdAt: -1 })
+      .populate('user relatedSchedule', 'name username title assignedDate')
+      .lean(),
+    SalesOrder.find({})
+      .sort({ createdAt: -1 })
+      .populate('user client', 'name username email phone location')
+      .lean(),
+    Client.find({})
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .populate('assignedTo createdBy', 'name username email phone')
+      .lean(),
+    ClientVisit.find({})
+      .sort({ createdAt: -1 })
+      .populate('user client relatedSchedule', 'name username title assignedDate')
+      .lean(),
+    Schedule.find({})
+      .sort({ assignedDate: -1, createdAt: -1 })
+      .populate('user client createdBy', 'name username email phone')
+      .lean(),
+    Notification.find({})
+      .sort({ createdAt: -1 })
+      .populate('user', 'name username role')
+      .lean(),
+    MessageThread.find({})
+      .sort({ updatedAt: -1 })
+      .populate('staffUser', 'name username email phone department')
+      .populate('messages.sender', 'name username role')
+      .lean(),
+    ActivityLog.find({})
+      .sort({ createdAt: -1 })
+      .populate('user', 'name username role')
+      .lean(),
+  ]);
+
+  const marketingContacts = users.filter((user) => user.marketingOptIn);
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'LTE Admin Portal';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  addWorksheet(workbook, 'Summary', [
+    {
+      generatedAt: new Date().toISOString(),
+      users: users.length,
+      marketingContacts: marketingContacts.length,
+      websiteOrders: websiteOrders.length,
+      categories: categories.length,
+      products: products.length,
+      attendanceLogs: attendanceLogs.length,
+      dailyReports: dailyReports.length,
+      staffOrders: salesOrders.length,
+      clients: clients.length,
+      clientVisits: clientVisits.length,
+      schedules: schedules.length,
+      notifications: notifications.length,
+      messageThreads: messageThreads.length,
+      activityLogs: activityLogs.length,
+    },
+  ]);
+
+  addWorksheet(
+    workbook,
+    'Users',
+    users.map((user) => ({
+      role: user.role || '',
+      name: user.name || '',
+      username: user.username || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      department: user.department || '',
+      marketingOptIn: user.marketingOptIn ? 'Yes' : 'No',
+      isActive: user.isActive ? 'Yes' : 'No',
+      mfaEnabled: user.mfaEnabled ? 'Yes' : 'No',
+      lastLoginAt: isoDate(user.lastLoginAt),
+      passwordChangedAt: isoDate(user.passwordChangedAt),
+      address: joinParts([
+        user.address?.fullName,
+        user.address?.phone,
+        user.address?.line1,
+        user.address?.line2,
+        user.address?.city,
+        user.address?.country,
+        user.address?.postalCode,
+      ], ', '),
+      createdAt: isoDate(user.createdAt),
+      updatedAt: isoDate(user.updatedAt),
+    }))
+  );
+
+  addWorksheet(
+    workbook,
+    'Marketing Contacts',
+    marketingContacts.map((user) => ({
+      name: user.name || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      username: user.username || '',
+      createdAt: isoDate(user.createdAt),
+    }))
+  );
+
+  addWorksheet(
+    workbook,
+    'Website Orders',
+    websiteOrders.map((order) => ({
+      invoiceNumber: order.invoiceNumber || '',
+      status: order.status || '',
+      paymentMethod: order.paymentMethod || '',
+      paymentStatus: order.paymentStatus || '',
+      customerName: order.customer?.name || '',
+      customerEmail: order.customer?.email || '',
+      customerPhone: order.customer?.phone || '',
+      accountName: order.user?.name || order.user?.username || '',
+      shippingAddress: joinParts([
+        order.shippingAddress?.fullName,
+        order.shippingAddress?.phone,
+        order.shippingAddress?.line1,
+        order.shippingAddress?.line2,
+        order.shippingAddress?.city,
+        order.shippingAddress?.country,
+        order.shippingAddress?.postalCode,
+      ], ', '),
+      items: (order.items || [])
+        .map((item) => `${item.name || '-'} x${item.quantity || 0}${item.size ? ` (${item.size})` : ''}${item.price !== undefined ? ` @ ${item.price}` : ''}`)
+        .join(' | '),
+      subtotal: order.subtotal ?? 0,
+      shippingFee: order.shippingFee ?? 0,
+      total: order.total ?? 0,
+      notes: csvCell(order.notes),
+      createdAt: isoDate(order.createdAt),
+      updatedAt: isoDate(order.updatedAt),
+    }))
+  );
+
+  addWorksheet(
+    workbook,
+    'Categories',
+    categories.map((category) => ({
+      name: category.name || '',
+      slug: category.slug || '',
+      parent: category.parent?.name || '',
+      parentSlug: category.parent?.slug || '',
+      sortOrder: category.sortOrder ?? '',
+      createdAt: isoDate(category.createdAt),
+      updatedAt: isoDate(category.updatedAt),
+    }))
+  );
+
+  addWorksheet(
+    workbook,
+    'Products',
+    products.map((product) => ({
+      name: product.name || '',
+      brand: product.brand || '',
+      category: product.categorySlug?.name || '',
+      categorySlug: product.categorySlug?.slug || '',
+      parentCategory: product.categorySlug?.parent?.name || '',
+      sku: product.sku || '',
+      basePrice: product.basePrice ?? '',
+      featured: product.featured ? 'Yes' : 'No',
+      isActive: product.isActive === false ? 'No' : 'Yes',
+      image: product.image || '',
+      description: csvCell(product.description),
+      variants: (product.variants || [])
+        .map((variant) => joinParts([variant.name || variant.type, variant.sku, variant.price !== undefined ? `price:${variant.price}` : '', variant.stock !== undefined ? `stock:${variant.stock}` : '']))
+        .filter(Boolean)
+        .join(' | '),
+      createdAt: isoDate(product.createdAt),
+      updatedAt: isoDate(product.updatedAt),
+    }))
+  );
+
+  addWorksheet(
+    workbook,
+    'Attendance',
+    attendanceLogs.map((entry) => ({
+      employee: entry.user?.name || entry.user?.username || '',
+      department: entry.user?.department || '',
+      date: entry.date || '',
+      checkInTime: isoDate(entry.checkInTime),
+      checkOutTime: isoDate(entry.checkOutTime),
+      totalWorkedMinutes: entry.totalWorkedMinutes ?? 0,
+      mileageWeekStart: entry.mileageWeekStart ?? '',
+      mileageWeekStartAt: isoDate(entry.mileageWeekStartAt),
+      mileageWeekEnd: entry.mileageWeekEnd ?? '',
+      mileageWeekEndAt: isoDate(entry.mileageWeekEndAt),
+      checkInNote: csvCell(entry.checkInNote),
+      checkOutNote: csvCell(entry.checkOutNote),
+      createdAt: isoDate(entry.createdAt),
+      updatedAt: isoDate(entry.updatedAt),
+    }))
+  );
+
+  addWorksheet(
+    workbook,
+    'Daily Reports',
+    dailyReports.map((entry) => ({
+      employee: entry.user?.name || entry.user?.username || '',
+      date: entry.date || '',
+      summary: csvCell(entry.summary),
+      notes: csvCell(entry.notes),
+      followUpNeeded: entry.followUpNeeded ? 'Yes' : 'No',
+      relatedSchedule: entry.relatedSchedule?.title || '',
+      visits: (entry.visits || []).map((visit) => `${visit.clientName || '-'}: ${csvCell(visit.outcome)}`).join(' | '),
+      createdAt: isoDate(entry.createdAt),
+      updatedAt: isoDate(entry.updatedAt),
+    }))
+  );
+
+  addWorksheet(
+    workbook,
+    'Staff Orders',
+    salesOrders.map((entry) => ({
+      employee: entry.user?.name || entry.user?.username || '',
+      client: entry.client?.name || '',
+      customerName: entry.customerName || '',
+      companyName: entry.companyName || '',
+      contactPerson: entry.contactPerson || '',
+      status: entry.status || '',
+      urgency: entry.urgency || '',
+      emailSent: entry.emailSent ? 'Yes' : 'No',
+      emailSentAt: isoDate(entry.emailSentAt),
+      emailError: csvCell(entry.emailError),
+      items: (entry.items || [])
+        .map((item) => `${item.productName || '-'} x${item.quantity || 0}${item.price !== undefined ? ` @ ${item.price}` : ''}`)
+        .join(' | '),
+      deliveryNote: csvCell(entry.deliveryNote),
+      notes: csvCell(entry.notes),
+      submittedAt: isoDate(entry.submittedAt || entry.createdAt),
+      updatedAt: isoDate(entry.updatedAt),
+    }))
+  );
+
+  addWorksheet(
+    workbook,
+    'Clients',
+    clients.map((entry) => ({
+      name: entry.name || '',
+      companyType: entry.companyType || '',
+      department: entry.department || '',
+      contactPerson: entry.contactPerson || '',
+      phone: entry.phone || '',
+      email: entry.email || '',
+      location: entry.location || '',
+      address: csvCell(entry.address),
+      assignedTo: entry.assignedTo?.name || entry.assignedTo?.username || '',
+      createdBy: entry.createdBy?.name || entry.createdBy?.username || '',
+      notes: csvCell(entry.notes),
+      createdAt: isoDate(entry.createdAt),
+      updatedAt: isoDate(entry.updatedAt),
+    }))
+  );
+
+  addWorksheet(
+    workbook,
+    'Visits',
+    clientVisits.map((entry) => ({
+      employee: entry.user?.name || entry.user?.username || '',
+      client: entry.client?.name || entry.clientName || '',
+      visitDate: entry.visitDate || '',
+      visitTime: entry.visitTime || '',
+      metPerson: entry.metPerson || '',
+      location: entry.location || '',
+      purpose: entry.purpose || '',
+      discussionSummary: csvCell(entry.discussionSummary),
+      outcome: csvCell(entry.outcome),
+      relatedSchedule: entry.relatedSchedule?.title || '',
+      createdAt: isoDate(entry.createdAt),
+      updatedAt: isoDate(entry.updatedAt),
+    }))
+  );
+
+  addWorksheet(
+    workbook,
+    'Schedules',
+    schedules.map((entry) => ({
+      employee: entry.user?.name || entry.user?.username || '',
+      title: entry.title || '',
+      assignedDate: entry.assignedDate || '',
+      startTime: entry.startTime || '',
+      endTime: entry.endTime || '',
+      client: entry.client?.name || entry.clientLabel || '',
+      location: entry.location || '',
+      status: entry.status || '',
+      notes: csvCell(entry.notes),
+      createdBy: entry.createdBy?.name || entry.createdBy?.username || '',
+      createdAt: isoDate(entry.createdAt),
+      updatedAt: isoDate(entry.updatedAt),
+    }))
+  );
+
+  addWorksheet(
+    workbook,
+    'Notifications',
+    notifications.map((entry) => ({
+      user: entry.user?.name || entry.user?.username || '',
+      role: entry.user?.role || '',
+      title: entry.title || '',
+      message: csvCell(entry.message),
+      type: entry.type || '',
+      read: entry.read ? 'Yes' : 'No',
+      relatedModule: entry.relatedModule || '',
+      relatedRecord: trimText(entry.relatedRecord),
+      createdAt: isoDate(entry.createdAt),
+      updatedAt: isoDate(entry.updatedAt),
+    }))
+  );
+
+  addWorksheet(
+    workbook,
+    'Messages',
+    messageThreads.flatMap((thread) =>
+      (thread.messages || []).map((message) => ({
+        staffUser: thread.staffUser?.name || thread.staffUser?.username || '',
+        staffEmail: thread.staffUser?.email || '',
+        staffPhone: thread.staffUser?.phone || '',
+        sender: message.sender?.name || message.sender?.username || '',
+        senderRole: message.senderRole || '',
+        text: csvCell(message.text),
+        attachments: (message.attachments || []).map((attachment) => attachment.name || attachment.url || '').join(' | '),
+        readByAdmin: message.readByAdmin ? 'Yes' : 'No',
+        readByStaff: message.readByStaff ? 'Yes' : 'No',
+        createdAt: isoDate(message.createdAt),
+        updatedAt: isoDate(message.updatedAt),
+      }))
+    )
+  );
+
+  addWorksheet(
+    workbook,
+    'Activity Logs',
+    activityLogs.map((entry) => ({
+      user: entry.user?.name || entry.user?.username || '',
+      role: entry.user?.role || '',
+      module: entry.module || '',
+      action: entry.action || '',
+      recordId: trimText(entry.recordId),
+      metadata: trimText(JSON.stringify(entry.metadata || {})),
+      createdAt: isoDate(entry.createdAt),
+    }))
+  );
+
+  return workbook;
+};
+
+const buildFullRecoveryExportPayload = async () => {
+  const db = mongoose.connection.db;
+  if (!db) {
+    throw new Error('Database connection is not ready.');
+  }
+
+  const collections = await db.collections();
+  const exportedCollections = [];
+
+  for (const collection of collections.sort((left, right) => left.collectionName.localeCompare(right.collectionName))) {
+    const documents = await collection.find({}).toArray();
+    exportedCollections.push({
+      name: collection.collectionName,
+      count: documents.length,
+      documents: documents.map((document) => toExtendedJson(document)),
+    });
+  }
+
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    database: db.databaseName,
+    collections: exportedCollections,
+  };
 };
 
 const buildStaffReportData = async (staffUser, selectedDate) => {
@@ -764,6 +1209,47 @@ router.get('/exports/:resource', async (req, res, next) => {
       metadata: { resource: req.params.resource, count: rows.length },
     });
     return exportCsv(res, `${req.params.resource}.csv`, rows);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/full-export', async (req, res, next) => {
+  try {
+    const workbook = await buildFullExportWorkbook();
+    const timestamp = formatDateOnly(new Date()).replace(/-/g, '');
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    await logActivity({
+      user: req.user,
+      action: 'admin_full_export_downloaded',
+      module: 'export',
+      metadata: { format: 'xlsx' },
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="lte-full-export-${timestamp}.xlsx"`);
+    return res.status(200).send(buffer);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/full-recovery-export', async (req, res, next) => {
+  try {
+    const payload = await buildFullRecoveryExportPayload();
+    const timestamp = formatDateOnly(new Date()).replace(/-/g, '');
+
+    await logActivity({
+      user: req.user,
+      action: 'admin_full_recovery_export_downloaded',
+      module: 'export',
+      metadata: { format: 'json', collections: payload.collections.length },
+    });
+
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="lte-full-recovery-export-${timestamp}.json"`);
+    return res.status(200).send(JSON.stringify(payload, null, 2));
   } catch (error) {
     return next(error);
   }

@@ -1,6 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const { sendMail, getNotificationRecipient } = require('../utils/mailer');
+const { renderNotificationEmail } = require('../utils/notification-email');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -20,26 +21,42 @@ router.post('/apply', upload.single('cv'), async (req, res) => {
       'SMTP_FROM'
     );
     if (to) {
+      const text = [
+        'Dear Madam,',
+        '',
+        'A new CV application has been submitted.',
+        '',
+        `Name: ${name}`,
+        `Phone: ${phone}`,
+        `Nationality: ${nationality}`,
+        `Email: ${email || '-'}`,
+        '',
+        'The applicant CV is attached to this email.',
+        '',
+        'Regards',
+        'Leading Trading Team',
+        'HR Department',
+      ].join('\n');
       await sendMail({
         to,
         subject: `New CV Application: ${name}`,
-        text: `Name: ${name}\nPhone: ${phone}\nNationality: ${nationality}\nEmail: ${email || '-'}`,
-        html: `
-          <div style="font-family: Arial, sans-serif; color: #13273f; line-height: 1.6;">
-            <h2 style="margin:0 0 12px;">New CV Application</h2>
-            <table style="width:100%; border-collapse:collapse;">
-              <tr>
-                <td style="padding:10px; border:1px solid #e6dccd;"><strong>Name</strong><br />${name}</td>
-                <td style="padding:10px; border:1px solid #e6dccd;"><strong>Phone</strong><br />${phone}</td>
-              </tr>
-              <tr>
-                <td style="padding:10px; border:1px solid #e6dccd;"><strong>Nationality</strong><br />${nationality}</td>
-                <td style="padding:10px; border:1px solid #e6dccd;"><strong>Email</strong><br />${email || '-'}</td>
-              </tr>
-            </table>
-            <p style="margin-top:16px;">The applicant CV is attached to this email.</p>
-          </div>
-        `,
+        text,
+        html: renderNotificationEmail({
+          preheader: 'LTE Careers Notification',
+          heading: 'New CV Application',
+          introLines: [
+            'Dear Madam,',
+            'A new CV application has been submitted.',
+          ],
+          detailRows: [
+            { label: 'Name', value: name },
+            { label: 'Phone', value: phone },
+            { label: 'Nationality', value: nationality },
+            { label: 'Email', value: email || '-' },
+          ],
+          footerNote: 'The applicant CV is attached to this email.',
+          signoffRole: 'HR Department',
+        }),
         attachments: [
           {
             filename: req.file.originalname,
