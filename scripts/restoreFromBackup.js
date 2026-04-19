@@ -19,13 +19,14 @@ const {
 } = require('mongodb');
 
 const requiredEnv = ['MONGO_URI', 'BACKUP_ARCHIVE'];
+const readEnv = (key) => String(process.env[key] || '').trim();
 
 const ensureEnv = () => {
-  const missing = requiredEnv.filter((key) => !process.env[key]);
+  const missing = requiredEnv.filter((key) => !readEnv(key));
   if (missing.length) {
     throw new Error(`Missing required env: ${missing.join(', ')}`);
   }
-  if (String(process.env.BACKUP_ARCHIVE || '').endsWith('.enc') && !process.env.BACKUP_ENCRYPTION_KEY) {
+  if (readEnv('BACKUP_ARCHIVE').endsWith('.enc') && !readEnv('BACKUP_ENCRYPTION_KEY')) {
     throw new Error('Missing required env: BACKUP_ENCRYPTION_KEY for encrypted backup restore.');
   }
 };
@@ -81,7 +82,7 @@ const fromExtendedJson = (value) => {
 
 const parseJsonLine = (line) => fromExtendedJson(JSON.parse(line));
 const getEncryptionKey = () =>
-  crypto.createHash('sha256').update(String(process.env.BACKUP_ENCRYPTION_KEY || '')).digest();
+  crypto.createHash('sha256').update(readEnv('BACKUP_ENCRYPTION_KEY')).digest();
 
 const decryptArchive = async (sourcePath, targetPath) => {
   const stat = fs.statSync(sourcePath);
@@ -101,6 +102,7 @@ const decryptArchive = async (sourcePath, targetPath) => {
   await new Promise((resolve, reject) => {
     input.on('error', reject);
     output.on('error', reject);
+    decipher.on('error', (err) => reject(new Error(`Failed to decrypt backup archive: ${err.message}`)));
     output.on('finish', resolve);
     input.pipe(decipher).pipe(output);
   });
@@ -214,10 +216,10 @@ const verifyArchive = async (archivePath) => {
 const main = async () => {
   ensureEnv();
 
-  const archivePath = process.env.BACKUP_ARCHIVE;
-  const dropExisting = String(process.env.RESTORE_DROP_EXISTING || 'false') === 'true';
-  const batchSize = Number(process.env.RESTORE_BATCH_SIZE || 1000);
-  const verifyOnly = String(process.env.RESTORE_VERIFY_ONLY || 'false') === 'true';
+  const archivePath = readEnv('BACKUP_ARCHIVE');
+  const dropExisting = readEnv('RESTORE_DROP_EXISTING') === 'true';
+  const batchSize = Number(readEnv('RESTORE_BATCH_SIZE') || 1000);
+  const verifyOnly = readEnv('RESTORE_VERIFY_ONLY') === 'true';
 
   if (!fs.existsSync(archivePath)) {
     throw new Error(`Backup archive not found: ${archivePath}`);
@@ -233,7 +235,7 @@ const main = async () => {
 
   const { tempDir, cleanup } = await extractArchive(archivePath);
 
-  const client = new MongoClient(process.env.MONGO_URI, {
+  const client = new MongoClient(readEnv('MONGO_URI'), {
     maxPoolSize: 2,
     serverSelectionTimeoutMS: 20000,
   });
@@ -267,4 +269,5 @@ module.exports = {
   parseJsonLine,
   listCollections,
   verifyArchive,
+  readEnv,
 };
