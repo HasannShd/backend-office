@@ -4,6 +4,7 @@ const { ObjectId } = require('mongodb');
 
 const {
   getUploadFilename,
+  getLatestAliasFilename,
   toExtendedJson,
 } = require('../scripts/backupToDrive');
 
@@ -27,14 +28,27 @@ test('getUploadFilename uses encrypted extension when needed', () => {
   restoreBackupFilename(original);
 });
 
-test('getUploadFilename returns sensible defaults', () => {
+test('getUploadFilename returns timestamped archive name by default', () => {
   const original = process.env.BACKUP_FILENAME;
   restoreBackupFilename(undefined);
 
-  assert.equal(getUploadFilename('/tmp/lte-backup.tgz'), 'lte-backup-latest.tgz');
-  assert.equal(getUploadFilename('/tmp/lte-backup.tgz.enc'), 'lte-backup-latest.tgz.enc');
+  assert.equal(getUploadFilename('/tmp/lte-backup-2026-04-19-230000.tgz'), 'lte-backup-2026-04-19-230000.tgz');
+  assert.equal(getUploadFilename('/tmp/lte-backup-2026-04-19-230000.tgz.enc'), 'lte-backup-2026-04-19-230000.tgz.enc');
 
   restoreBackupFilename(original);
+});
+
+test('getLatestAliasFilename honors encrypted extension when configured', () => {
+  const original = process.env.BACKUP_LATEST_ALIAS;
+  process.env.BACKUP_LATEST_ALIAS = 'lte-backup-latest.tgz';
+
+  assert.equal(
+    getLatestAliasFilename('/tmp/lte-backup-2026-04-19-230000.tgz.enc'),
+    'lte-backup-latest.tgz.enc'
+  );
+
+  if (typeof original === 'string') process.env.BACKUP_LATEST_ALIAS = original;
+  else delete process.env.BACKUP_LATEST_ALIAS;
 });
 
 test('toExtendedJson serializes ObjectId and Date values', () => {

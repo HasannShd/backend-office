@@ -85,7 +85,16 @@ const getUploadFilename = (archivePath) => {
     return configured;
   }
 
-  return archivePath.endsWith('.enc') ? 'lte-backup-latest.tgz.enc' : 'lte-backup-latest.tgz';
+  return path.basename(archivePath);
+};
+
+const getLatestAliasFilename = (archivePath) => {
+  const configured = String(process.env.BACKUP_LATEST_ALIAS || '').trim();
+  if (!configured) return '';
+  if (archivePath.endsWith('.enc') && !configured.endsWith('.enc')) {
+    return `${configured}.enc`;
+  }
+  return configured;
 };
 
 const toExtendedJson = (value) => {
@@ -199,10 +208,10 @@ const exportCollections = async (db, outputDir) => {
   return summary;
 };
 
-const uploadToDrive = async (archivePath, folderId) => {
-  const auth = getDriveAuth();
-  const drive = google.drive({ version: 'v3', auth });
-  const filename = getUploadFilename(archivePath);
+const upsertDriveFile = async (drive, archivePath, folderId, filename) => {
+  if (!filename) {
+    throw new Error('Missing upload filename.');
+  }
 
   const query = [
     `'${folderId}' in parents`,
@@ -245,6 +254,20 @@ const uploadToDrive = async (archivePath, folderId) => {
   });
 
   return response.data;
+};
+
+const uploadToDrive = async (archivePath, folderId) => {
+  const auth = getDriveAuth();
+  const drive = google.drive({ version: 'v3', auth });
+  const filename = getUploadFilename(archivePath);
+  const latestAlias = getLatestAliasFilename(archivePath);
+  const uploaded = await upsertDriveFile(drive, archivePath, folderId, filename);
+
+  if (latestAlias && latestAlias !== filename) {
+    await upsertDriveFile(drive, archivePath, folderId, latestAlias);
+  }
+
+  return uploaded;
 };
 
 const main = async () => {
@@ -310,6 +333,7 @@ module.exports = {
   ensureEnv,
   formatTimestamp,
   getUploadFilename,
+  getLatestAliasFilename,
   isEncryptionEnabled,
   toExtendedJson,
 };
