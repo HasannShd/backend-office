@@ -6,6 +6,7 @@ const Cart = require('../models/cart');
 const verifyToken = require('../middleware/verify-token');
 const isAdmin = require('../middleware/is-admin');
 const { sendMail, getNotificationRecipient } = require('../utils/mailer');
+const { escapeHtml, renderNotificationEmail } = require('../utils/notification-email');
 const { buildInvoicePdf } = require('../utils/invoice');
 const { logActivity } = require('../services/activity-log-service');
 
@@ -21,14 +22,6 @@ const generateInvoiceNumber = () => {
 const calcShipping = (subtotal) => (subtotal < 10 ? 1 : 0);
 
 const formatMoney = (value, currency = 'BHD') => `${Number(value || 0).toFixed(3)} ${currency}`;
-const escapeHtml = (value) =>
-  String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-
 const sendOrderEmail = async (order) => {
   const to = getNotificationRecipient(
     'WEBSITE_ORDER_NOTIFY_EMAIL',
@@ -46,6 +39,8 @@ const sendOrderEmail = async (order) => {
       )}`
   );
   const text = [
+    'Dear Madam,',
+    '',
     `New website order ${order.invoiceNumber}`,
     `Customer: ${order.customer?.name || '-'}`,
     `Email: ${order.customer?.email || '-'}`,
@@ -68,43 +63,47 @@ const sendOrderEmail = async (order) => {
     `Shipping: ${formatMoney(order.shippingFee, order.currency)}`,
     `Total: ${formatMoney(order.total, order.currency)}`,
     `Notes: ${order.notes || '-'}`,
+    '',
+    'Regards',
+    'Leading Trading Team',
+    'Operations Department',
   ].join('\n');
-  const html = `
-    <div style="font-family: Arial, sans-serif; color: #13273f; line-height: 1.6;">
-      <h2 style="margin:0 0 10px;">New Website Order</h2>
-      <p style="margin:0 0 18px;"><strong>Invoice:</strong> ${escapeHtml(order.invoiceNumber)}</p>
-
-      <table style="width:100%; border-collapse:collapse; margin-bottom:18px;">
-        <tr>
-          <td style="padding:10px; border:1px solid #e6dccd;"><strong>Customer</strong><br />${escapeHtml(order.customer?.name || '-')}</td>
-          <td style="padding:10px; border:1px solid #e6dccd;"><strong>Email</strong><br />${escapeHtml(order.customer?.email || '-')}</td>
-        </tr>
-        <tr>
-          <td style="padding:10px; border:1px solid #e6dccd;"><strong>Phone</strong><br />${escapeHtml(order.customer?.phone || '-')}</td>
-          <td style="padding:10px; border:1px solid #e6dccd;"><strong>Payment</strong><br />${escapeHtml(order.paymentMethod || '-')} (${escapeHtml(order.paymentStatus || 'pending')})</td>
-        </tr>
-      </table>
-
-      <div style="margin-bottom:18px;">
-        <h3 style="margin:0 0 8px;">Shipping Address</h3>
-        <div style="padding:12px; border:1px solid #e6dccd; border-radius:12px; background:#fbf8f2;">
-          <div>${escapeHtml(order.shippingAddress?.fullName || '-')}</div>
-          <div>${escapeHtml(order.shippingAddress?.phone || '-')}</div>
-          <div>${escapeHtml(order.shippingAddress?.line1 || '-')}</div>
-          ${order.shippingAddress?.line2 ? `<div>${escapeHtml(order.shippingAddress.line2)}</div>` : ''}
-          <div>${escapeHtml(order.shippingAddress?.city || '-')} ${escapeHtml(order.shippingAddress?.postalCode || '')}</div>
-          <div>${escapeHtml(order.shippingAddress?.country || '-')}</div>
-        </div>
-      </div>
-
-      <h3 style="margin:0 0 8px;">Items</h3>
-      <table style="width:100%; border-collapse:collapse; margin-bottom:18px;">
+  const html = renderNotificationEmail({
+    preheader: 'LTE Website Order Notification',
+    heading: 'New Website Order',
+    introLines: [
+      'Dear Madam,',
+      'A new website order has been placed and is ready for review.',
+    ],
+    detailRows: [
+      { label: 'Invoice', value: order.invoiceNumber || '-' },
+      { label: 'Customer', value: order.customer?.name || '-' },
+      { label: 'Email', value: order.customer?.email || '-' },
+      { label: 'Phone', value: order.customer?.phone || '-' },
+      { label: 'Payment', value: `${order.paymentMethod || '-'} (${order.paymentStatus || 'pending'})` },
+      { label: 'Created', value: order.createdAt ? new Date(order.createdAt).toISOString() : new Date().toISOString() },
+      {
+        label: 'Shipping Address',
+        value: [
+          order.shippingAddress?.fullName,
+          order.shippingAddress?.phone,
+          order.shippingAddress?.line1,
+          order.shippingAddress?.line2,
+          `${order.shippingAddress?.city || '-'} ${order.shippingAddress?.postalCode || ''}`.trim(),
+          order.shippingAddress?.country,
+        ].filter(Boolean).join(', '),
+      },
+      { label: 'Notes', value: order.notes || '-' },
+    ],
+    sectionTitle: 'Items',
+    sectionBody: `
+      <table style="width:100%; border-collapse:collapse; margin:0 0 18px;">
         <thead>
           <tr>
-            <th style="text-align:left; padding:10px; border:1px solid #e6dccd;">Product</th>
-            <th style="text-align:left; padding:10px; border:1px solid #e6dccd;">Qty</th>
-            <th style="text-align:left; padding:10px; border:1px solid #e6dccd;">Unit</th>
-            <th style="text-align:left; padding:10px; border:1px solid #e6dccd;">Line Total</th>
+            <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Product</th>
+            <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Qty</th>
+            <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Unit</th>
+            <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Line Total</th>
           </tr>
         </thead>
         <tbody>
@@ -112,14 +111,13 @@ const sendOrderEmail = async (order) => {
             .map(
               (item) => `
                 <tr>
-                  <td style="padding:10px; border:1px solid #e6dccd;">${escapeHtml(item.name || '-')}${
+                  <td style="padding:10px 12px; border:1px solid #d7e0ea;">${escapeHtml(item.name || '-')}${
                     item.size ? `<br /><span style="color:#6a7b90;">${escapeHtml(item.size)}</span>` : ''
                   }</td>
-                  <td style="padding:10px; border:1px solid #e6dccd;">${item.quantity}</td>
-                  <td style="padding:10px; border:1px solid #e6dccd;">${formatMoney(item.price, order.currency)}</td>
-                  <td style="padding:10px; border:1px solid #e6dccd;">${formatMoney(
-                    Number(item.price || 0) * Number(item.quantity || 0),
-                    order.currency
+                  <td style="padding:10px 12px; border:1px solid #d7e0ea;">${item.quantity}</td>
+                  <td style="padding:10px 12px; border:1px solid #d7e0ea;">${escapeHtml(formatMoney(item.price, order.currency))}</td>
+                  <td style="padding:10px 12px; border:1px solid #d7e0ea;">${escapeHtml(
+                    formatMoney(Number(item.price || 0) * Number(item.quantity || 0), order.currency)
                   )}</td>
                 </tr>
               `
@@ -127,16 +125,22 @@ const sendOrderEmail = async (order) => {
             .join('')}
         </tbody>
       </table>
-
-      <div style="padding:12px; border:1px solid #e6dccd; border-radius:12px; background:#fbf8f2; margin-bottom:18px;">
-        <div><strong>Subtotal:</strong> ${formatMoney(order.subtotal, order.currency)}</div>
-        <div><strong>Shipping:</strong> ${formatMoney(order.shippingFee, order.currency)}</div>
-        <div><strong>Total:</strong> ${formatMoney(order.total, order.currency)}</div>
-      </div>
-
-      <div><strong>Notes:</strong> ${escapeHtml(order.notes || '-')}</div>
-    </div>
-  `;
+      <table style="width:100%; border-collapse:collapse; margin:0 0 18px;">
+        <tr>
+          <td style="padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; font-weight:700; color:#123a66;">Subtotal</td>
+          <td style="padding:10px 12px; border:1px solid #d7e0ea;">${escapeHtml(formatMoney(order.subtotal, order.currency))}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; font-weight:700; color:#123a66;">Shipping</td>
+          <td style="padding:10px 12px; border:1px solid #d7e0ea;">${escapeHtml(formatMoney(order.shippingFee, order.currency))}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; font-weight:700; color:#123a66;">Total</td>
+          <td style="padding:10px 12px; border:1px solid #d7e0ea;">${escapeHtml(formatMoney(order.total, order.currency))}</td>
+        </tr>
+      </table>
+    `,
+  });
   await sendMail({ to, subject: `New Website Order | ${order.invoiceNumber}`, text, html });
 };
 

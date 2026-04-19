@@ -1,4 +1,5 @@
 const { sendMail, isConfigured, getNotificationRecipient } = require('../utils/mailer');
+const { escapeHtml, renderNotificationEmail } = require('../utils/notification-email');
 
 const formatCurrency = (value) => {
   if (value === null || value === undefined || value === '') return '-';
@@ -12,6 +13,8 @@ const buildOrderEmail = ({ order, staff }) => {
   });
 
   const text = [
+    'Dear Madam,',
+    '',
     'New sales order submitted',
     '',
     `Staff: ${staff?.name || staff?.username || '-'}`,
@@ -29,39 +32,64 @@ const buildOrderEmail = ({ order, staff }) => {
     '',
     `Notes: ${order.notes || '-'}`,
     `Attachments: ${(order.attachments || []).length ? (order.attachments || []).map((entry) => entry.url).join(' | ') : '-'}`,
+    '',
+    'Regards',
+    'Leading Trading Team',
+    'Operations Department',
   ].join('\n');
 
-  const html = `
-    <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-      <h2>New Sales Order Submitted</h2>
-      <p><strong>Staff:</strong> ${staff?.name || staff?.username || '-'}</p>
-      <p><strong>Email:</strong> ${staff?.email || '-'}</p>
-      <p><strong>Phone:</strong> ${staff?.phone || '-'}</p>
-      <p><strong>Submitted:</strong> ${order.submittedAt.toISOString()}</p>
-      <hr />
-      <p><strong>Client:</strong> ${order.customerName || '-'}</p>
-      <p><strong>Company:</strong> ${order.companyName || '-'}</p>
-      <p><strong>Contact person:</strong> ${order.contactPerson || '-'}</p>
-      <p><strong>Urgency:</strong> ${order.urgency || '-'}</p>
-      <h3>Items</h3>
-      <ul>${order.items
-        .map(
-          (item) =>
-            `<li>${item.productName} | Qty: ${item.quantity} | Price: ${
-              item.price !== undefined && item.price !== null ? formatCurrency(item.price) : 'N/A'
-            }</li>`
-        )
-        .join('')}</ul>
-      <p><strong>Notes:</strong> ${order.notes || '-'}</p>
-      <p><strong>Attachments:</strong> ${
-        (order.attachments || []).length
-          ? (order.attachments || [])
-              .map((entry) => `<a href="${entry.url}" target="_blank" rel="noreferrer">${entry.name || entry.url}</a>`)
-              .join('<br />')
-          : '-'
-      }</p>
-    </div>
-  `;
+  const html = renderNotificationEmail({
+    preheader: 'LTE Sales Order Notification',
+    heading: 'New Sales Order Submitted',
+    introLines: [
+      'Dear Madam,',
+      'A new sales order has been submitted and is ready for office review.',
+    ],
+    detailRows: [
+      { label: 'Staff', value: staff?.name || staff?.username || '-' },
+      { label: 'Email', value: staff?.email || '-' },
+      { label: 'Phone', value: staff?.phone || '-' },
+      { label: 'Submitted', value: order.submittedAt.toISOString() },
+      { label: 'Client', value: order.customerName || '-' },
+      { label: 'Company', value: order.companyName || '-' },
+      { label: 'Contact Person', value: order.contactPerson || '-' },
+      { label: 'Urgency', value: order.urgency || '-' },
+      { label: 'Notes', value: order.notes || '-' },
+      {
+        label: 'Attachments',
+        value: (order.attachments || []).length
+          ? (order.attachments || []).map((entry) => entry.name || entry.url).join(' | ')
+          : '-',
+      },
+    ],
+    sectionTitle: 'Items',
+    sectionBody: `
+      <table style="width:100%; border-collapse:collapse; margin:0 0 18px;">
+        <thead>
+          <tr>
+            <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Product</th>
+            <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Quantity</th>
+            <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Price</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${order.items
+            .map(
+              (item) => `
+                <tr>
+                  <td style="padding:10px 12px; border:1px solid #d7e0ea;">${escapeHtml(item.productName || '-')}</td>
+                  <td style="padding:10px 12px; border:1px solid #d7e0ea;">${item.quantity}</td>
+                  <td style="padding:10px 12px; border:1px solid #d7e0ea;">${
+                    item.price !== undefined && item.price !== null ? escapeHtml(formatCurrency(item.price)) : 'N/A'
+                  }</td>
+                </tr>
+              `
+            )
+            .join('')}
+        </tbody>
+      </table>
+    `,
+  });
 
   return { text, html };
 };
