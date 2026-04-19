@@ -28,6 +28,7 @@ const orderRoutes = require('./controllers/orders');
 const careersRoutes = require('./controllers/careers');
 const staffPortalRoutes = require('./controllers/staffPortal');
 const adminPortalRoutes = require('./controllers/adminPortal');
+const aiRoutes = require('./controllers/ai');
 const app = express();
 const port = process.env.PORT || 5000;
 let mongoReady = false;
@@ -130,6 +131,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/careers', careersRoutes);
 app.use('/api/staff-portal', staffPortalRoutes);
 app.use('/api/admin-portal', adminPortalRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.use('/api', (req, res) => {
   res.status(404).json({ ok: false, message: 'API route not found.' });
