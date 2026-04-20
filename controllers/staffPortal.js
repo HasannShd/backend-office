@@ -38,6 +38,8 @@ const cleanOptionalText = (value) => {
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
 };
+const formatOrderItem = (item) =>
+  `${item.productName || '-'} x${item.quantity || 0}${item.uom ? ` ${item.uom}` : ''}${item.price !== undefined ? ` @ ${item.price}` : ''}`;
 
 const toRecentActivityItem = (record, label) => ({
   id: record._id,
@@ -363,6 +365,20 @@ router.post('/orders', async (req, res, next) => {
     const resolvedCustomerName = String(customerName || clientRecord?.contactPerson || clientRecord?.name || '').trim();
     const resolvedCompanyName = String(companyName || clientRecord?.name || '').trim();
     const resolvedContactPerson = String(contactPerson || clientRecord?.contactPerson || '').trim();
+    const normalizedItems = items
+      .map((item) => ({
+        productName: String(item?.productName || '').trim(),
+        quantity: Number(item?.quantity) > 0 ? Number(item.quantity) : 1,
+        ...(cleanOptionalText(item?.uom) ? { uom: cleanOptionalText(item.uom) } : {}),
+        ...(item?.price !== undefined && item?.price !== null && item?.price !== ''
+          ? { price: Number(item.price) || 0 }
+          : {}),
+      }))
+      .filter((item) => item.productName);
+
+    if (!normalizedItems.length) {
+      return fail(res, 'At least one valid order item is required.', 400);
+    }
 
     if (!resolvedCustomerName) {
       return fail(res, 'Customer name is required. Select a client or enter a contact name.', 400);
@@ -374,7 +390,7 @@ router.post('/orders', async (req, res, next) => {
       customerName: resolvedCustomerName,
       companyName: resolvedCompanyName,
       contactPerson: resolvedContactPerson,
-      items,
+      items: normalizedItems,
       attachments,
       notes,
       urgency,
@@ -449,7 +465,7 @@ router.get('/orders/export', async (req, res, next) => {
         contactPerson: order.contactPerson || '',
         urgency: order.urgency || '',
         deliveryNote: order.deliveryNote || '',
-        items: (order.items || []).map((item) => `${item.productName} x${item.quantity}${item.price !== undefined ? ` @ ${item.price}` : ''}`).join(' | '),
+        items: (order.items || []).map((item) => formatOrderItem(item)).join(' | '),
         notes: order.notes || '',
         attachments: (order.attachments || []).map((attachment) => attachment.url).join(' | '),
         emailSent: order.emailSent ? 'Yes' : 'No',

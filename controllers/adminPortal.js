@@ -39,6 +39,8 @@ const todayKey = () => {
   const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
 };
+const formatOrderItem = (item) =>
+  `${item.productName || item.name || '-'} x${item.quantity || 0}${item.uom ? ` ${item.uom}` : ''}${item.size ? ` (${item.size})` : ''}${item.price !== undefined ? ` @ ${item.price}` : ''}`;
 
 const sendUserNotification = async ({ user, title, message, type = 'info', relatedModule, relatedRecord }) => {
   if (!user) return null;
@@ -348,7 +350,7 @@ const buildFullExportWorkbook = async () => {
         order.shippingAddress?.postalCode,
       ], ', '),
       items: (order.items || [])
-        .map((item) => `${item.name || '-'} x${item.quantity || 0}${item.size ? ` (${item.size})` : ''}${item.price !== undefined ? ` @ ${item.price}` : ''}`)
+        .map((item) => formatOrderItem(item))
         .join(' | '),
       subtotal: order.subtotal ?? 0,
       shippingFee: order.shippingFee ?? 0,
@@ -449,7 +451,7 @@ const buildFullExportWorkbook = async () => {
       emailSentAt: isoDate(entry.emailSentAt),
       emailError: csvCell(entry.emailError),
       items: (entry.items || [])
-        .map((item) => `${item.productName || '-'} x${item.quantity || 0}${item.price !== undefined ? ` @ ${item.price}` : ''}`)
+        .map((item) => formatOrderItem(item))
         .join(' | '),
       deliveryNote: csvCell(entry.deliveryNote),
       notes: csvCell(entry.notes),
@@ -872,7 +874,7 @@ router.get('/staff/:id/report', async (req, res, next) => {
         contactPerson: entry.contactPerson || '-',
         client: entry.client?.name || '-',
         urgency: entry.urgency || '-',
-        items: (entry.items || []).map((item) => `${item.productName} x${item.quantity}${item.price ? ` @ ${item.price}` : ''}`).join(' | '),
+        items: (entry.items || []).map((item) => formatOrderItem(item)).join(' | '),
         deliveryNote: csvCell(entry.deliveryNote),
         notes: csvCell(entry.notes),
       }))

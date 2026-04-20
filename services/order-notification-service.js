@@ -5,11 +5,12 @@ const formatCurrency = (value) => {
   if (value === null || value === undefined || value === '') return '-';
   return `${Number(value).toFixed(2)} BHD`;
 };
+const formatQuantity = (item) => `${item.quantity}${item.uom ? ` ${item.uom}` : ''}`;
 
 const buildOrderEmail = ({ order, staff }) => {
   const lines = order.items.map((item, index) => {
     const unitPrice = item.price !== undefined && item.price !== null ? formatCurrency(item.price) : 'N/A';
-    return `${index + 1}. ${item.productName} | Qty: ${item.quantity} | Price: ${unitPrice}`;
+    return `${index + 1}. ${item.productName} | Qty: ${formatQuantity(item)} | Price: ${unitPrice}`;
   });
 
   const text = [
@@ -69,6 +70,7 @@ const buildOrderEmail = ({ order, staff }) => {
           <tr>
             <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Product</th>
             <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Quantity</th>
+            <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">UOM</th>
             <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Price</th>
           </tr>
         </thead>
@@ -79,6 +81,7 @@ const buildOrderEmail = ({ order, staff }) => {
                 <tr>
                   <td style="padding:10px 12px; border:1px solid #d7e0ea;">${escapeHtml(item.productName || '-')}</td>
                   <td style="padding:10px 12px; border:1px solid #d7e0ea;">${item.quantity}</td>
+                  <td style="padding:10px 12px; border:1px solid #d7e0ea;">${escapeHtml(item.uom || '-')}</td>
                   <td style="padding:10px 12px; border:1px solid #d7e0ea;">${
                     item.price !== undefined && item.price !== null ? escapeHtml(formatCurrency(item.price)) : 'N/A'
                   }</td>

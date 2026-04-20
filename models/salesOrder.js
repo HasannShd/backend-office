@@ -4,6 +4,7 @@ const salesOrderItemSchema = new mongoose.Schema(
   {
     productName: { type: String, required: true },
     quantity: { type: Number, required: true, min: 1 },
+    uom: String,
     price: Number,
   },
   { _id: false }
