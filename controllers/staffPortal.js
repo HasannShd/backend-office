@@ -61,6 +61,14 @@ const createNotification = async ({ user, title, message, type = 'info', related
     relatedRecord,
   });
 
+const runSideEffect = async (label, task) => {
+  try {
+    await task();
+  } catch (error) {
+    console.error(`[staff-portal] ${label} failed`, error);
+  }
+};
+
 const notifyAdmins = async ({ title, message, type = 'info', relatedModule, relatedRecord, pushUrl, pushTag, pushData }) => {
   const admins = await User.find({ role: 'admin', isActive: true }).select('_id');
   if (admins.length) {
@@ -440,24 +448,28 @@ router.post('/orders', async (req, res, next) => {
     }
     await order.save();
 
-    await logActivity({
-      user: req.user,
-      action: 'sales_order_submitted',
-      module: 'sales_order',
-      recordId: order._id,
-      metadata: { emailSent: order.emailSent },
-    });
+    await runSideEffect('log sales order activity', () =>
+      logActivity({
+        user: req.user,
+        action: 'sales_order_submitted',
+        module: 'sales_order',
+        recordId: order._id,
+        metadata: { emailSent: order.emailSent },
+      })
+    );
 
-    await notifyAdmins({
-      title: `New sales order from ${displayStaffName(req.user)}`,
-      message: `${displayStaffName(req.user)} submitted ${order.orderTiming === 'tomorrow' ? 'an order for tomorrow' : 'an order'} for ${order.companyName || order.client?.name || order.customerName}.`,
-      type: 'info',
-      relatedModule: 'sales_order',
-      relatedRecord: order._id,
-      pushUrl: `/admin/orders?focus=${encodeURIComponent(String(order._id))}`,
-      pushTag: `sales-order-${order._id}`,
-      pushData: { orderId: String(order._id) },
-    });
+    await runSideEffect('notify admins about sales order', () =>
+      notifyAdmins({
+        title: `New sales order from ${displayStaffName(req.user)}`,
+        message: `${displayStaffName(req.user)} submitted ${order.orderTiming === 'tomorrow' ? 'an order for tomorrow' : 'an order'} for ${order.companyName || order.client?.name || order.customerName}.`,
+        type: 'info',
+        relatedModule: 'sales_order',
+        relatedRecord: order._id,
+        pushUrl: `/admin/orders?focus=${encodeURIComponent(String(order._id))}`,
+        pushTag: `sales-order-${order._id}`,
+        pushData: { orderId: String(order._id) },
+      })
+    );
 
     return ok(res, { order }, 'Order submitted.', 201);
   } catch (error) {
