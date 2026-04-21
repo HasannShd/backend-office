@@ -340,7 +340,7 @@ router.get('/orders', async (req, res, next) => {
 
 router.post('/orders', async (req, res, next) => {
   try {
-    const { client, customerName, companyName, contactPerson, items = [], notes, urgency, deliveryNote } = req.body;
+    const { client, customerName, companyName, contactPerson, items = [], notes, urgency, vatApplicable, vatAmount, deliveryNote } = req.body;
     if (!Array.isArray(items) || !items.length) {
       return fail(res, 'At least one order item is required.', 400);
     }
@@ -384,6 +384,12 @@ router.post('/orders', async (req, res, next) => {
       return fail(res, 'Customer name is required. Select a client or enter a contact name.', 400);
     }
 
+    const normalizedVatApplicable = Boolean(vatApplicable);
+    const normalizedVatAmount =
+      normalizedVatApplicable && vatAmount !== undefined && vatAmount !== null && vatAmount !== ''
+        ? Number(vatAmount)
+        : undefined;
+
     const order = await SalesOrder.create({
       user: req.user._id,
       client: clientRecord?._id,
@@ -394,6 +400,8 @@ router.post('/orders', async (req, res, next) => {
       attachments,
       notes,
       urgency,
+      vatApplicable: normalizedVatApplicable,
+      ...(normalizedVatAmount !== undefined && !Number.isNaN(normalizedVatAmount) ? { vatAmount: normalizedVatAmount } : {}),
       deliveryNote,
       submittedAt: new Date(),
       statusHistory: [{ status: 'submitted', note: 'Order submitted by staff user', changedBy: req.user._id }],
@@ -464,6 +472,8 @@ router.get('/orders/export', async (req, res, next) => {
         companyName: order.companyName || '',
         contactPerson: order.contactPerson || '',
         urgency: order.urgency || '',
+        vatApplicable: order.vatApplicable ? 'Yes' : 'No',
+        vatAmount: order.vatAmount ?? '',
         deliveryNote: order.deliveryNote || '',
         items: (order.items || []).map((item) => formatOrderItem(item)).join(' | '),
         notes: order.notes || '',

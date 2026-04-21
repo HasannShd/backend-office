@@ -30,6 +30,8 @@ const salesOrderSchema = new mongoose.Schema(
     attachments: { type: [salesOrderAttachmentSchema], default: [] },
     notes: String,
     urgency: { type: String, enum: ['low', 'normal', 'high', 'urgent'], default: 'normal' },
+    vatApplicable: { type: Boolean, default: false },
+    vatAmount: Number,
     deliveryNote: String,
     status: {
       type: String,

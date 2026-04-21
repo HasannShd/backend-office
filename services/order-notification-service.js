@@ -27,6 +27,8 @@ const buildOrderEmail = ({ order, staff }) => {
     `Company: ${order.companyName || '-'}`,
     `Contact person: ${order.contactPerson || '-'}`,
     `Urgency: ${order.urgency || '-'}`,
+    `VAT applicable: ${order.vatApplicable ? 'Yes' : 'No'}`,
+    `VAT amount: ${order.vatAmount ?? '-'}`,
     '',
     'Items:',
     ...lines,
@@ -55,6 +57,8 @@ const buildOrderEmail = ({ order, staff }) => {
       { label: 'Company', value: order.companyName || '-' },
       { label: 'Contact Person', value: order.contactPerson || '-' },
       { label: 'Urgency', value: order.urgency || '-' },
+      { label: 'VAT Applicable', value: order.vatApplicable ? 'Yes' : 'No' },
+      { label: 'VAT Amount', value: order.vatAmount ?? '-' },
       { label: 'Notes', value: order.notes || '-' },
       {
         label: 'Attachments',
