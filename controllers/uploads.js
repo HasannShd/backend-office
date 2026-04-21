@@ -32,25 +32,33 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-const allowedUploadExtensions = new Set([
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.webp',
-  '.gif',
-  '.bmp',
-  '.avif',
-  '.svg',
-  '.heic',
-  '.heif',
-  '.jfif',
-  '.pdf',
-  '.doc',
-  '.docx',
-  '.xls',
-  '.xlsx',
-  '.csv',
-  '.txt',
+const blockedUploadExtensions = new Set([
+  '.exe',
+  '.msi',
+  '.bat',
+  '.cmd',
+  '.com',
+  '.scr',
+  '.sh',
+  '.ps1',
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.jar',
+  '.apk',
+  '.dmg',
+  '.pkg',
+  '.vb',
+  '.vbs',
+]);
+
+const blockedUploadMimePrefixes = ['application/x-msdownload', 'application/x-executable', 'application/x-msdos-program'];
+const blockedUploadMimes = new Set([
+  'application/x-sh',
+  'application/x-bat',
+  'text/javascript',
+  'application/javascript',
+  'application/x-javascript',
 ]);
 
 const getFileExtension = (filename = '') => {
@@ -61,26 +69,18 @@ const getFileExtension = (filename = '') => {
 const isImageUpload = (file) => {
   const mime = String(file?.mimetype || '').toLowerCase();
   const extension = getFileExtension(file?.originalname);
-  return mime.startsWith('image/') || allowedUploadExtensions.has(extension) && extension !== '.pdf';
+  return mime.startsWith('image/') || ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.svg', '.heic', '.heif', '.jfif'].includes(extension);
 };
 
 const isAllowedUpload = (file) => {
   if (!file) return false;
 
   const mime = String(file.mimetype || '').toLowerCase();
-  if (
-    mime.startsWith('image/') ||
-    mime === 'application/pdf' ||
-    mime === 'application/msword' ||
-    mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-    mime === 'application/vnd.ms-excel' ||
-    mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-    mime === 'text/csv' ||
-    mime === 'text/plain'
-  ) return true;
-
   const extension = getFileExtension(file.originalname);
-  return allowedUploadExtensions.has(extension);
+  if (blockedUploadExtensions.has(extension)) return false;
+  if (blockedUploadMimes.has(mime)) return false;
+  if (blockedUploadMimePrefixes.some((prefix) => mime.startsWith(prefix))) return false;
+  return true;
 };
 
 const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype, folder = 'LTE-products') => new Promise((resolve, reject) => {
@@ -140,7 +140,7 @@ router.post('/', requireAuthUser, requireRoles('admin', 'sales_staff'), upload.s
     }
 
     if (!isAllowedUpload(req.file)) {
-      return res.status(400).json({ message: 'Only images, PDF files, or office documents are allowed.' });
+      return res.status(400).json({ message: 'Executable or script file types are not allowed.' });
     }
 
     const result = await uploadBufferToCloudinary(
