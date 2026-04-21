@@ -40,7 +40,7 @@ const todayKey = () => {
   return `${values.year}-${values.month}-${values.day}`;
 };
 const formatOrderItem = (item) =>
-  `${item.productName || item.name || '-'} x${item.quantity || 0}${item.uom ? ` ${item.uom}` : ''}${item.size ? ` (${item.size})` : ''}${item.price !== undefined ? ` @ ${item.price}` : ''}`;
+  `${item.productName || item.name || '-'} x${item.quantity || 0}${item.uom ? ` ${item.uom}` : ''}${item.vatApplicable ? ` | VAT ${item.vatAmount ?? 'Yes'}` : ''}${item.size ? ` (${item.size})` : ''}${item.price !== undefined ? ` @ ${item.price}` : ''}`;
 
 const sendUserNotification = async ({ user, title, message, type = 'info', relatedModule, relatedRecord }) => {
   if (!user) return null;
@@ -231,7 +231,7 @@ const buildFullExportWorkbook = async () => {
       .populate('user relatedSchedule', 'name username title assignedDate')
       .lean(),
     SalesOrder.find({})
-      .sort({ createdAt: -1 })
+      .sort({ requestedForDate: -1, createdAt: -1 })
       .populate('user client', 'name username email phone location')
       .lean(),
     Client.find({})
@@ -445,6 +445,8 @@ const buildFullExportWorkbook = async () => {
       customerName: entry.customerName || '',
       companyName: entry.companyName || '',
       contactPerson: entry.contactPerson || '',
+      requestedForDate: entry.requestedForDate || '',
+      orderTiming: entry.orderTiming || 'today',
       status: entry.status || '',
       urgency: entry.urgency || '',
       emailSent: entry.emailSent ? 'Yes' : 'No',
@@ -800,7 +802,7 @@ router.get('/staff/:id/report', async (req, res, next) => {
       { section: 'Filtered Clients', value: reportData.metrics.filteredClientsCount },
       { section: 'Last Check In', value: formatDateTime(reportData.latest.attendance?.checkInTime) },
       { section: 'Last Report Date', value: reportData.latest.report?.date || '-' },
-      { section: 'Last Order', value: reportData.latest.order?.customerName || reportData.latest.order?.companyName || '-' },
+      { section: 'Last Order', value: reportData.latest.order?.companyName || reportData.latest.order?.client?.name || reportData.latest.order?.customerName || '-' },
       { section: 'Last Visit', value: reportData.latest.visit?.purpose || reportData.latest.visit?.clientName || '-' },
     ]);
 
@@ -873,6 +875,8 @@ router.get('/staff/:id/report', async (req, res, next) => {
         company: entry.companyName || '-',
         contactPerson: entry.contactPerson || '-',
         client: entry.client?.name || '-',
+        requestedForDate: entry.requestedForDate || '-',
+        orderTiming: entry.orderTiming || 'today',
         urgency: entry.urgency || '-',
         items: (entry.items || []).map((item) => formatOrderItem(item)).join(' | '),
         deliveryNote: csvCell(entry.deliveryNote),
@@ -1061,7 +1065,7 @@ router.get('/reports', async (req, res, next) => {
 
 router.get('/orders', async (req, res, next) => {
   try {
-    const orders = await SalesOrder.find(applyAdminFilters(req)).sort({ createdAt: -1 }).populate('user client', 'name username');
+    const orders = await SalesOrder.find(applyAdminFilters(req)).sort({ requestedForDate: -1, createdAt: -1 }).populate('user client', 'name username');
     return ok(res, { orders });
   } catch (error) {
     return next(error);
@@ -1084,7 +1088,7 @@ router.patch('/orders/:id', async (req, res, next) => {
     await sendUserNotification({
       user: order.user,
       title: 'Order updated',
-      message: `Your order for ${order.companyName || order.customerName} is now ${order.status}.`,
+      message: `Your order for ${order.companyName || order.client?.name || order.customerName} is now ${order.status}.`,
       relatedModule: 'sales_order',
       relatedRecord: order._id,
     });
@@ -1092,8 +1096,8 @@ router.patch('/orders/:id', async (req, res, next) => {
     await sendStaffPushIfAvailable({
       userId: order.user,
       title: 'Order status updated',
-      body: `${order.companyName || order.customerName} is now ${order.status}.`,
-      url: `/staff/orders?focus=${encodeURIComponent(String(order._id))}`,
+      body: `${order.companyName || order.client?.name || order.customerName} is now ${order.status}.`,
+      url: `/staff/order-history?focus=${encodeURIComponent(String(order._id))}`,
       tag: `staff-order-${order._id}`,
       data: { orderId: String(order._id) },
     });

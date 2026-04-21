@@ -10,21 +10,23 @@ const formatQuantity = (item) => `${item.quantity}${item.uom ? ` ${item.uom}` : 
 const buildOrderEmail = ({ order, staff }) => {
   const lines = order.items.map((item, index) => {
     const unitPrice = item.price !== undefined && item.price !== null ? formatCurrency(item.price) : 'N/A';
-    return `${index + 1}. ${item.productName} | Qty: ${formatQuantity(item)} | Price: ${unitPrice}`;
+    const vatText = item.vatApplicable ? ` | VAT: ${item.vatAmount ?? 'Yes'}` : '';
+    return `${index + 1}. ${item.productName} | Qty: ${formatQuantity(item)}${vatText} | Price: ${unitPrice}`;
   });
 
   const text = [
-    'Dear Madam,',
+    'Dear Admin,',
     '',
     'New sales order submitted',
     '',
-    `Staff: ${staff?.name || staff?.username || '-'}`,
+    `Staff to Admin: ${staff?.name || staff?.username || '-'}`,
     `Email: ${staff?.email || '-'}`,
     `Phone: ${staff?.phone || '-'}`,
     `Submitted: ${order.submittedAt.toISOString()}`,
+    `Requested for date: ${order.requestedForDate || '-'}`,
+    `Order timing: ${order.orderTiming || 'today'}`,
     '',
-    `Client: ${order.customerName || '-'}`,
-    `Company: ${order.companyName || '-'}`,
+    `Facility: ${order.companyName || order.client?.name || '-'}`,
     `Contact person: ${order.contactPerson || '-'}`,
     `Urgency: ${order.urgency || '-'}`,
     `VAT applicable: ${order.vatApplicable ? 'Yes' : 'No'}`,
@@ -37,24 +39,24 @@ const buildOrderEmail = ({ order, staff }) => {
     `Attachments: ${(order.attachments || []).length ? (order.attachments || []).map((entry) => entry.url).join(' | ') : '-'}`,
     '',
     'Regards',
-    'Leading Trading Team',
-    'Operations Department',
+    'Staff to Admin',
   ].join('\n');
 
   const html = renderNotificationEmail({
     preheader: 'LTE Sales Order Notification',
     heading: 'New Sales Order Submitted',
     introLines: [
-      'Dear Madam,',
+      'Dear Admin,',
       'A new sales order has been submitted and is ready for office review.',
     ],
     detailRows: [
-      { label: 'Staff', value: staff?.name || staff?.username || '-' },
+      { label: 'Staff to Admin', value: staff?.name || staff?.username || '-' },
       { label: 'Email', value: staff?.email || '-' },
       { label: 'Phone', value: staff?.phone || '-' },
       { label: 'Submitted', value: order.submittedAt.toISOString() },
-      { label: 'Client', value: order.customerName || '-' },
-      { label: 'Company', value: order.companyName || '-' },
+      { label: 'Requested For', value: order.requestedForDate || '-' },
+      { label: 'Order Timing', value: order.orderTiming || 'today' },
+      { label: 'Facility', value: order.companyName || order.client?.name || '-' },
       { label: 'Contact Person', value: order.contactPerson || '-' },
       { label: 'Urgency', value: order.urgency || '-' },
       { label: 'VAT Applicable', value: order.vatApplicable ? 'Yes' : 'No' },
@@ -75,6 +77,7 @@ const buildOrderEmail = ({ order, staff }) => {
             <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Product</th>
             <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Quantity</th>
             <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">UOM</th>
+            <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">VAT</th>
             <th style="text-align:left; padding:10px 12px; border:1px solid #d7e0ea; background:#f6f9fc; color:#123a66;">Price</th>
           </tr>
         </thead>
@@ -86,6 +89,7 @@ const buildOrderEmail = ({ order, staff }) => {
                   <td style="padding:10px 12px; border:1px solid #d7e0ea;">${escapeHtml(item.productName || '-')}</td>
                   <td style="padding:10px 12px; border:1px solid #d7e0ea;">${item.quantity}</td>
                   <td style="padding:10px 12px; border:1px solid #d7e0ea;">${escapeHtml(item.uom || '-')}</td>
+                  <td style="padding:10px 12px; border:1px solid #d7e0ea;">${escapeHtml(item.vatApplicable ? String(item.vatAmount ?? 'Yes') : 'No')}</td>
                   <td style="padding:10px 12px; border:1px solid #d7e0ea;">${
                     item.price !== undefined && item.price !== null ? escapeHtml(formatCurrency(item.price)) : 'N/A'
                   }</td>
@@ -96,6 +100,8 @@ const buildOrderEmail = ({ order, staff }) => {
         </tbody>
       </table>
     `,
+    signoffName: 'Staff to Admin',
+    signoffRole: '',
   });
 
   return { text, html };
@@ -121,7 +127,7 @@ const sendSalesOrderEmail = async ({ order, staff }) => {
 
   await sendMail({
     to,
-    subject: `LTE Sales Order | ${order.companyName || order.customerName || 'New submission'}`,
+    subject: `LTE Sales Order | ${order.companyName || order.client?.name || order.customerName || 'New submission'}`,
     text,
     html,
   });

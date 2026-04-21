@@ -5,6 +5,8 @@ const salesOrderItemSchema = new mongoose.Schema(
     productName: { type: String, required: true },
     quantity: { type: Number, required: true, min: 1 },
     uom: String,
+    vatApplicable: { type: Boolean, default: false },
+    vatAmount: Number,
     price: Number,
   },
   { _id: false }
@@ -32,6 +34,8 @@ const salesOrderSchema = new mongoose.Schema(
     urgency: { type: String, enum: ['low', 'normal', 'high', 'urgent'], default: 'normal' },
     vatApplicable: { type: Boolean, default: false },
     vatAmount: Number,
+    orderTiming: { type: String, enum: ['today', 'tomorrow'], default: 'today' },
+    requestedForDate: String,
     deliveryNote: String,
     status: {
       type: String,

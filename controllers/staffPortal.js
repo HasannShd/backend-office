@@ -22,16 +22,20 @@ const router = express.Router();
 
 const isValidObjectId = (value) => mongoose.isValidObjectId(value);
 const PORTAL_TIME_ZONE = process.env.PORTAL_TIME_ZONE || 'Asia/Baghdad';
-const todayKey = () => {
+const portalDateKey = (offsetDays = 0) => {
+  const baseDate = new Date();
+  baseDate.setDate(baseDate.getDate() + offsetDays);
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: PORTAL_TIME_ZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date());
+  }).formatToParts(baseDate);
   const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
 };
+const todayKey = () => portalDateKey(0);
+const tomorrowKey = () => portalDateKey(1);
 const getOwnFilter = (req, extra = {}) => ({ user: req.user._id, ...extra });
 const cleanOptionalText = (value) => {
   if (typeof value !== 'string') return value;
@@ -39,7 +43,7 @@ const cleanOptionalText = (value) => {
   return trimmed ? trimmed : undefined;
 };
 const formatOrderItem = (item) =>
-  `${item.productName || '-'} x${item.quantity || 0}${item.uom ? ` ${item.uom}` : ''}${item.price !== undefined ? ` @ ${item.price}` : ''}`;
+  `${item.productName || '-'} x${item.quantity || 0}${item.uom ? ` ${item.uom}` : ''}${item.vatApplicable ? ` | VAT ${item.vatAmount ?? 'Yes'}` : ''}${item.price !== undefined ? ` @ ${item.price}` : ''}`;
 
 const toRecentActivityItem = (record, label) => ({
   id: record._id,
@@ -123,7 +127,7 @@ router.get('/dashboard', async (req, res, next) => {
       AttendanceLog.findOne(getOwnFilter(req, { date: todayKey() })),
       DailyReport.find(getOwnFilter(req)).sort({ createdAt: -1 }).limit(3),
       Notification.find({ user: req.user._id, read: false }).sort({ createdAt: -1 }).limit(5),
-      SalesOrder.find(getOwnFilter(req)).sort({ createdAt: -1 }).limit(3),
+      SalesOrder.find(getOwnFilter(req)).sort({ requestedForDate: -1, createdAt: -1 }).limit(3),
     ]);
 
     return ok(res, {
@@ -330,7 +334,7 @@ router.post('/reports', async (req, res, next) => {
 router.get('/orders', async (req, res, next) => {
   try {
     const orders = await SalesOrder.find(getOwnFilter(req))
-      .sort({ createdAt: -1 })
+      .sort({ requestedForDate: -1, createdAt: -1 })
       .populate('client', 'name contactPerson phone email location');
     return ok(res, { orders });
   } catch (error) {
@@ -340,7 +344,7 @@ router.get('/orders', async (req, res, next) => {
 
 router.post('/orders', async (req, res, next) => {
   try {
-    const { client, customerName, companyName, contactPerson, items = [], notes, urgency, vatApplicable, vatAmount, deliveryNote } = req.body;
+    const { client, customerName, companyName, contactPerson, items = [], notes, urgency, vatApplicable, vatAmount, orderTiming, deliveryNote } = req.body;
     if (!Array.isArray(items) || !items.length) {
       return fail(res, 'At least one order item is required.', 400);
     }
@@ -370,6 +374,10 @@ router.post('/orders', async (req, res, next) => {
         productName: String(item?.productName || '').trim(),
         quantity: Number(item?.quantity) > 0 ? Number(item.quantity) : 1,
         ...(cleanOptionalText(item?.uom) ? { uom: cleanOptionalText(item.uom) } : {}),
+        ...(item?.vatApplicable ? { vatApplicable: true } : {}),
+        ...(item?.vatApplicable && item?.vatAmount !== undefined && item?.vatAmount !== null && item?.vatAmount !== ''
+          ? { vatAmount: Number(item.vatAmount) || 0 }
+          : {}),
         ...(item?.price !== undefined && item?.price !== null && item?.price !== ''
           ? { price: Number(item.price) || 0 }
           : {}),
@@ -389,6 +397,8 @@ router.post('/orders', async (req, res, next) => {
       normalizedVatApplicable && vatAmount !== undefined && vatAmount !== null && vatAmount !== ''
         ? Number(vatAmount)
         : undefined;
+    const normalizedOrderTiming = orderTiming === 'tomorrow' ? 'tomorrow' : 'today';
+    const requestedForDate = normalizedOrderTiming === 'tomorrow' ? tomorrowKey() : todayKey();
 
     const order = await SalesOrder.create({
       user: req.user._id,
@@ -402,9 +412,17 @@ router.post('/orders', async (req, res, next) => {
       urgency,
       vatApplicable: normalizedVatApplicable,
       ...(normalizedVatAmount !== undefined && !Number.isNaN(normalizedVatAmount) ? { vatAmount: normalizedVatAmount } : {}),
+      orderTiming: normalizedOrderTiming,
+      requestedForDate,
       deliveryNote,
       submittedAt: new Date(),
-      statusHistory: [{ status: 'submitted', note: 'Order submitted by staff user', changedBy: req.user._id }],
+      statusHistory: [
+        {
+          status: 'submitted',
+          note: normalizedOrderTiming === 'tomorrow' ? 'Order submitted for tomorrow' : 'Order submitted by staff user',
+          changedBy: req.user._id,
+        },
+      ],
       ...createTallyBridgePayload({ order: { _id: undefined } }),
     });
 
@@ -432,7 +450,7 @@ router.post('/orders', async (req, res, next) => {
 
     await notifyAdmins({
       title: `New sales order from ${displayStaffName(req.user)}`,
-      message: `${displayStaffName(req.user)} submitted an order for ${order.companyName || order.customerName}.`,
+      message: `${displayStaffName(req.user)} submitted ${order.orderTiming === 'tomorrow' ? 'an order for tomorrow' : 'an order'} for ${order.companyName || order.client?.name || order.customerName}.`,
       type: 'info',
       relatedModule: 'sales_order',
       relatedRecord: order._id,
@@ -474,6 +492,8 @@ router.get('/orders/export', async (req, res, next) => {
         urgency: order.urgency || '',
         vatApplicable: order.vatApplicable ? 'Yes' : 'No',
         vatAmount: order.vatAmount ?? '',
+        orderTiming: order.orderTiming || 'today',
+        requestedForDate: order.requestedForDate || '',
         deliveryNote: order.deliveryNote || '',
         items: (order.items || []).map((item) => formatOrderItem(item)).join(' | '),
         notes: order.notes || '',
