@@ -6,6 +6,7 @@ const formatCurrency = (value) => {
   return `${Number(value).toFixed(2)} BHD`;
 };
 const formatQuantity = (item) => `${item.quantity}${item.uom ? ` ${item.uom}` : ''}`;
+const attachmentLabel = (entry, index) => entry?.name || entry?.url?.split('/').pop() || `Attachment ${index + 1}`;
 
 const buildOrderEmail = ({ order, staff }) => {
   const lines = order.items.map((item, index) => {
@@ -36,7 +37,7 @@ const buildOrderEmail = ({ order, staff }) => {
     ...lines,
     '',
     `Notes: ${order.notes || '-'}`,
-    `Attachments: ${(order.attachments || []).length ? (order.attachments || []).map((entry) => entry.url).join(' | ') : '-'}`,
+    `Attachments: ${(order.attachments || []).length ? (order.attachments || []).map((entry, index) => `${attachmentLabel(entry, index)}: ${entry.url}`).join(' | ') : '-'}`,
     '',
     'Regards',
     'Staff to Admin',
@@ -62,12 +63,6 @@ const buildOrderEmail = ({ order, staff }) => {
       { label: 'VAT Applicable', value: order.vatApplicable ? 'Yes' : 'No' },
       { label: 'VAT Amount', value: order.vatAmount ?? '-' },
       { label: 'Notes', value: order.notes || '-' },
-      {
-        label: 'Attachments',
-        value: (order.attachments || []).length
-          ? (order.attachments || []).map((entry) => entry.name || entry.url).join(' | ')
-          : '-',
-      },
     ],
     sectionTitle: 'Items',
     sectionBody: `
@@ -100,6 +95,10 @@ const buildOrderEmail = ({ order, staff }) => {
         </tbody>
       </table>
     `,
+    attachmentItems: (order.attachments || []).map((entry, index) => ({
+      label: attachmentLabel(entry, index),
+      href: entry.url,
+    })),
     signoffName: 'Staff to Admin',
     signoffRole: '',
   });
@@ -120,6 +119,13 @@ const sendSalesOrderEmail = async ({ order, staff }) => {
   }
 
   const { text, html } = buildOrderEmail({ order, staff });
+  const mailAttachments = (order.attachments || [])
+    .filter((entry) => entry?.url)
+    .map((entry, index) => ({
+      filename: attachmentLabel(entry, index),
+      path: entry.url,
+      contentType: entry.mimeType || undefined,
+    }));
 
   if (!isConfigured) {
     return { sent: false, skipped: true, reason: 'SMTP not configured.' };
@@ -130,6 +136,7 @@ const sendSalesOrderEmail = async ({ order, staff }) => {
     subject: `LTE Sales Order | ${order.companyName || order.client?.name || order.customerName || 'New submission'}`,
     text,
     html,
+    attachments: mailAttachments,
   });
 
   return { sent: true, skipped: false };

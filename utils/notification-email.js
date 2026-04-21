@@ -52,17 +52,40 @@ const renderBullets = (items = []) => {
   `;
 };
 
+const renderAttachmentList = (items = []) => {
+  const safeItems = items.filter((item) => item && item.label && item.href);
+  if (!safeItems.length) return '';
+
+  return `
+    <div style="margin:0 0 18px;">
+      ${safeItems
+        .map(
+          (item) => `
+            <div style="margin:0 0 10px; padding:12px 14px; border:1px solid #d7e0ea; border-radius:12px; background:#f8fbff; word-break:break-word;">
+              <a href="${escapeHtml(item.href)}" style="color:#1d4f91; font-weight:600; text-decoration:none;">${escapeHtml(item.label)}</a>
+            </div>
+          `
+        )
+        .join('')}
+    </div>
+  `;
+};
+
 const renderFooter = ({ signoffName = DEFAULT_SIGNOFF_NAME, signoffRole = DEFAULT_SIGNOFF_ROLE } = {}) => `
   <div style="margin-top:28px; color:#234d80;">
     <div style="margin-bottom:18px;">Regards</div>
     <div style="margin-bottom:10px; font-weight:700;">${escapeHtml(signoffName)}</div>
-    <div style="margin-bottom:18px;">${escapeHtml(signoffRole)}</div>
-    <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px;">
-      <img src="${escapeHtml(COMPANY_LOGO_URL)}" alt="LTE" style="width:72px; height:72px; object-fit:contain; border-radius:10px; background:#ffffff;" />
-      <div>
-        <div style="font-weight:800; font-size:16px; color:#123a66;">${escapeHtml(COMPANY_NAME)}</div>
-      </div>
-    </div>
+    ${signoffRole ? `<div style="margin-bottom:18px;">${escapeHtml(signoffRole)}</div>` : '<div style="margin-bottom:18px;"></div>'}
+    <table role="presentation" style="border-collapse:collapse; margin:0 0 14px;">
+      <tr>
+        <td style="vertical-align:middle; padding:0 14px 0 0;">
+          <img src="${escapeHtml(COMPANY_LOGO_URL)}" alt="LTE" style="display:block; width:72px; height:72px; object-fit:contain; border-radius:10px; background:#ffffff;" />
+        </td>
+        <td style="vertical-align:middle;">
+          <div style="font-weight:800; font-size:16px; color:#123a66;">${escapeHtml(COMPANY_NAME)}</div>
+        </td>
+      </tr>
+    </table>
     <div style="color:#234d80; line-height:1.65;">
       <div>${escapeHtml(COMPANY_ADDRESS_LINE_1)}</div>
       <div>${escapeHtml(COMPANY_ADDRESS_LINE_2)}</div>
@@ -80,6 +103,7 @@ const renderNotificationEmail = ({
   detailRows = [],
   sectionTitle = '',
   sectionBody = '',
+  attachmentItems = [],
   bulletItems = [],
   footerNote = '',
   signoffName,
@@ -95,7 +119,11 @@ const renderNotificationEmail = ({
         ${normalizeLines(introLines).map((line) => `<p style="margin:0 0 18px; line-height:1.7;">${escapeHtml(line)}</p>`).join('')}
         ${renderKeyValueTable(detailRows)}
         ${sectionTitle ? `<h2 style="margin:24px 0 10px; font-size:18px; color:#123a66;">${escapeHtml(sectionTitle)}</h2>` : ''}
-        ${sectionBody}
+        <div style="margin:0 0 18px; word-break:break-word; overflow-wrap:anywhere;">
+          ${sectionBody}
+        </div>
+        ${attachmentItems.length ? `<h2 style="margin:24px 0 10px; font-size:18px; color:#123a66;">Attachments</h2>` : ''}
+        ${renderAttachmentList(attachmentItems)}
         ${renderBullets(bulletItems)}
         ${footerNote ? `<p style="margin:0 0 18px; line-height:1.7;">${escapeHtml(footerNote)}</p>` : ''}
         ${renderFooter({ signoffName, signoffRole })}

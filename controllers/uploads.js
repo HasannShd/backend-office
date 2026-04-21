@@ -92,6 +92,7 @@ const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype, folder = '
     .slice(0, 80) || `upload-${Date.now()}`;
   const extension = getFileExtension(originalname);
   const normalizedMime = String(mimetype || '').toLowerCase();
+  const isImage = isImageUpload({ originalname, mimetype });
   const preferredFormat = (() => {
     if (normalizedMime === 'application/pdf' || extension === '.pdf') return 'pdf';
     if (extension === '.doc') return 'doc';
@@ -113,10 +114,12 @@ const uploadBufferToCloudinary = (fileBuffer, originalname, mimetype, folder = '
   const uploadStream = cloudinaryV2.uploader.upload_stream(
     {
       folder,
-      resource_type: isImageUpload({ originalname, mimetype }) ? 'image' : 'raw',
+      resource_type: isImage ? 'image' : 'raw',
       public_id: `${publicIdBase}-${Date.now()}`,
       overwrite: false,
-      format: preferredFormat,
+      ...(isImage ? { format: preferredFormat } : {}),
+      use_filename: true,
+      unique_filename: true,
     },
     (error, result) => {
       if (error) return reject(error);
