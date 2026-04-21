@@ -39,8 +39,14 @@ const todayKey = () => {
   const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
 };
-const formatOrderItem = (item) =>
-  `${item.productName || item.name || '-'} x${item.quantity || 0}${item.uom ? ` ${item.uom}` : ''}${item.vatApplicable ? ` | VAT ${item.vatAmount ?? 'Yes'}` : ''}${item.size ? ` (${item.size})` : ''}${item.price !== undefined ? ` @ ${item.price}` : ''}`;
+const formatOrderItem = (item) => {
+  const quantity = item.quantity || 0;
+  const hasExplicitStructure = Boolean(
+    item.uom || item.vatApplicable || item.size || (item.price !== undefined && item.price !== null)
+  );
+  const quantityLabel = quantity === 1 && !hasExplicitStructure ? '' : ` x${quantity}`;
+  return `${item.productName || item.name || '-'}${quantityLabel}${item.uom ? ` ${item.uom}` : ''}${item.vatApplicable ? ` | VAT ${item.vatAmount ?? 'Yes'}` : ''}${item.size ? ` (${item.size})` : ''}${item.price !== undefined ? ` @ ${item.price}` : ''}`;
+};
 
 const sendUserNotification = async ({ user, title, message, type = 'info', relatedModule, relatedRecord }) => {
   if (!user) return null;

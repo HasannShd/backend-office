@@ -42,8 +42,14 @@ const cleanOptionalText = (value) => {
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
 };
-const formatOrderItem = (item) =>
-  `${item.productName || '-'} x${item.quantity || 0}${item.uom ? ` ${item.uom}` : ''}${item.vatApplicable ? ` | VAT ${item.vatAmount ?? 'Yes'}` : ''}${item.price !== undefined ? ` @ ${item.price}` : ''}`;
+const formatOrderItem = (item) => {
+  const quantity = item.quantity || 0;
+  const hasExplicitStructure = Boolean(
+    item.uom || item.vatApplicable || (item.price !== undefined && item.price !== null)
+  );
+  const quantityLabel = quantity === 1 && !hasExplicitStructure ? '' : ` x${quantity}`;
+  return `${item.productName || '-'}${quantityLabel}${item.uom ? ` ${item.uom}` : ''}${item.vatApplicable ? ` | VAT ${item.vatAmount ?? 'Yes'}` : ''}${item.price !== undefined ? ` @ ${item.price}` : ''}`;
+};
 
 const toRecentActivityItem = (record, label) => ({
   id: record._id,

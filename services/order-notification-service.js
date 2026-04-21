@@ -5,7 +5,13 @@ const formatCurrency = (value) => {
   if (value === null || value === undefined || value === '') return '-';
   return `${Number(value).toFixed(2)} BHD`;
 };
-const formatQuantity = (item) => `${item.quantity}${item.uom ? ` ${item.uom}` : ''}`;
+const formatQuantity = (item) => {
+  const quantity = item.quantity ?? 0;
+  const hasExplicitStructure = Boolean(
+    item.uom || item.vatApplicable || (item.price !== undefined && item.price !== null)
+  );
+  return quantity === 1 && !hasExplicitStructure ? '-' : `${quantity}${item.uom ? ` ${item.uom}` : ''}`;
+};
 const attachmentLabel = (entry, index) => entry?.name || entry?.url?.split('/').pop() || `Attachment ${index + 1}`;
 
 const buildOrderEmail = ({ order, staff }) => {
