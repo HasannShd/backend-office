@@ -691,6 +691,56 @@ const applyAdminFilters = (req, base = {}) => {
   return filters;
 };
 
+const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const addAndFilter = (filters, condition) => {
+  filters.$and = filters.$and || [];
+  filters.$and.push(condition);
+  return filters;
+};
+
+const dayBoundsUtc = (dateKey) => {
+  const start = new Date(`${dateKey}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime())) return null;
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return { start, end };
+};
+
+const buildOrderAdminFilters = async (req) => {
+  const filters = applyAdminFilters(req);
+  const dateKey = String(req.query.date || '').trim();
+  const search = String(req.query.search || '').trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    const bounds = dayBoundsUtc(dateKey);
+    if (bounds) {
+      addAndFilter(filters, {
+        $or: [
+          { requestedForDate: dateKey },
+          { requestedForDate: { $in: [null, ''] }, submittedAt: { $gte: bounds.start, $lt: bounds.end } },
+          { requestedForDate: { $exists: false }, createdAt: { $gte: bounds.start, $lt: bounds.end } },
+        ],
+      });
+    }
+  }
+
+  if (search) {
+    const expression = new RegExp(escapeRegex(search), 'i');
+    const clients = await Client.find({ name: expression }).select('_id').lean();
+    addAndFilter(filters, {
+      $or: [
+        { companyName: expression },
+        { customerName: expression },
+        { contactPerson: expression },
+        ...(clients.length ? [{ client: { $in: clients.map((client) => client._id) } }] : []),
+      ],
+    });
+  }
+
+  return filters;
+};
+
 const exportCsv = (res, filename, rows) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -1071,7 +1121,7 @@ router.get('/reports', async (req, res, next) => {
 
 router.get('/orders', async (req, res, next) => {
   try {
-    const orders = await SalesOrder.find(applyAdminFilters(req)).sort({ requestedForDate: -1, createdAt: -1 }).populate('user client', 'name username');
+    const orders = await SalesOrder.find(await buildOrderAdminFilters(req)).sort({ requestedForDate: -1, createdAt: -1 }).populate('user client', 'name username');
     return ok(res, { orders });
   } catch (error) {
     return next(error);
