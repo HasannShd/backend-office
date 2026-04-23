@@ -15,7 +15,11 @@ module.exports = async function requireAuthUser(req, res, next) {
         return res.status(403).json({ ok: false, message: 'This account is inactive.' });
       }
 
-      if (req.tokenIssuedAt && user.passwordChangedAt && new Date(user.passwordChangedAt) > req.tokenIssuedAt) {
+      if (
+        req.tokenIssuedAt &&
+        user.passwordChangedAt &&
+        new Date(user.passwordChangedAt).getTime() - req.tokenIssuedAt.getTime() > 5000
+      ) {
         return res.status(401).json({ ok: false, message: 'Session expired. Please sign in again.' });
       }
 
