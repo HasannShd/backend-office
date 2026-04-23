@@ -445,9 +445,8 @@ router.post('/orders', async (req, res, next) => {
     order.emailSentAt = emailResult.sent ? new Date() : undefined;
     order.emailError = emailResult.sent ? undefined : emailResult.reason || undefined;
     if (emailResult.sent) {
-      order.status = 'emailed';
       order.statusHistory.push({
-        status: 'emailed',
+        status: 'submitted',
         note: 'Order email sent to company mailbox',
         changedBy: req.user._id,
       });
