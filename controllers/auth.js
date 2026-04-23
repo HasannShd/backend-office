@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 
 const User = require('../models/user');
 const { sendMail, isConfigured: isMailerConfigured } = require('../utils/mailer');
+const { buildIdentifierQuery } = require('../utils/identifier');
 const { logActivity } = require('../services/activity-log-service');
 const {
   getPublicPushConfig,
@@ -42,16 +43,9 @@ const buildPayload = (user) => ({
 });
 
 const findUserByIdentifier = async (identifier) => {
-  if (!identifier) return null;
-  const normalizedIdentifier = String(identifier).trim();
-  const normalizedEmailIdentifier = normalizedIdentifier.toLowerCase();
-  return User.findOne({
-    $or: [
-      { username: normalizedIdentifier },
-      { email: normalizedEmailIdentifier },
-      { phone: normalizedIdentifier },
-    ],
-  });
+  const query = buildIdentifierQuery(identifier);
+  if (!query) return null;
+  return User.findOne(query);
 };
 
 const normalizeUsername = (email, username) => {
