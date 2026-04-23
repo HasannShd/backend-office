@@ -43,7 +43,7 @@ const buildOrderEmail = ({ order, staff }) => {
     ...lines,
     '',
     `Notes: ${order.notes || '-'}`,
-    `Attachments: ${(order.attachments || []).length ? (order.attachments || []).map((entry, index) => `${attachmentLabel(entry, index)}: ${entry.url}`).join(' | ') : '-'}`,
+    `Attachments: ${(order.attachments || []).length ? (order.attachments || []).map((entry, index) => attachmentLabel(entry, index)).join(' | ') : '-'}`,
     '',
     'Regards',
     'Staff to Admin',
@@ -69,6 +69,7 @@ const buildOrderEmail = ({ order, staff }) => {
       { label: 'VAT Applicable', value: order.vatApplicable ? 'Yes' : 'No' },
       { label: 'VAT Amount', value: order.vatAmount ?? '-' },
       { label: 'Notes', value: order.notes || '-' },
+      { label: 'Attachments', value: (order.attachments || []).length ? `${order.attachments.length} file(s) attached to this email` : '-' },
     ],
     sectionTitle: 'Items',
     sectionBody: `
@@ -101,10 +102,7 @@ const buildOrderEmail = ({ order, staff }) => {
         </tbody>
       </table>
     `,
-    attachmentItems: (order.attachments || []).map((entry, index) => ({
-      label: attachmentLabel(entry, index),
-      href: entry.url,
-    })),
+    attachmentItems: [],
     signoffName: 'Staff to Admin',
     signoffRole: '',
   });
