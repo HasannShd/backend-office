@@ -82,7 +82,8 @@ app.use(express.json({ limit: '2mb' }));
 
 const authLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
-  max: 20,
+  max: 60,
+  skip: (req) => req.method === 'OPTIONS' || (req.method === 'GET' && req.path === '/me'),
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
