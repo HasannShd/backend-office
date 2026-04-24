@@ -73,6 +73,11 @@ const buildTrustedDeviceLabel = (req) => {
   if (/macintosh|mac os/i.test(userAgent)) return 'Mac browser';
   return 'Trusted browser';
 };
+const touchTrustedDevice = (entry) => {
+  if (!entry) return;
+  entry.lastUsedAt = new Date();
+  entry.expiresAt = new Date(Date.now() + TRUSTED_DEVICE_TTL_MS);
+};
 const registerTrustedDevice = (user, req) => {
   cleanTrustedDevices(user);
   const deviceToken = crypto.randomBytes(32).toString('hex');
@@ -91,8 +96,28 @@ const useTrustedDevice = (user, deviceToken) => {
   const tokenHash = hashTrustedDeviceToken(deviceToken);
   const entry = (user.trustedDevices || []).find((item) => item.tokenHash === tokenHash);
   if (!entry) return false;
-  entry.lastUsedAt = new Date();
+  touchTrustedDevice(entry);
   return true;
+};
+const ensureTrustedDevice = (user, req, deviceToken) => {
+  if (useTrustedDevice(user, deviceToken)) {
+    return String(deviceToken || '').trim();
+  }
+  return registerTrustedDevice(user, req);
+};
+const findUserByTrustedDevice = async (role, deviceToken) => {
+  const tokenHash = hashTrustedDeviceToken(deviceToken);
+  const user = await User.findOne({
+    role,
+    isActive: { $ne: false },
+    'trustedDevices.tokenHash': tokenHash,
+  });
+  if (!user) return null;
+  cleanTrustedDevices(user);
+  const entry = (user.trustedDevices || []).find((item) => item.tokenHash === tokenHash);
+  if (!entry) return null;
+  touchTrustedDevice(entry);
+  return user;
 };
 const signSessionToken = (user) =>
   jwt.sign({ payload: buildPayload(user) }, process.env.JWT_SECRET, { expiresIn: TOKEN_TTLS[user.role] || TOKEN_TTLS.user });
@@ -163,7 +188,9 @@ const signUpHandler = async (req, res) => {
     });
 
     const token = signSessionToken(user);
+    const trustedDeviceToken = ensureTrustedDevice(user, req, String(req.body.trustedDeviceToken || '').trim());
     setAuthCookie(res, user, token);
+    await user.save();
 
     await logActivity({
       user,
@@ -173,7 +200,7 @@ const signUpHandler = async (req, res) => {
       metadata: { role: user.role },
     });
 
-    res.status(201).json({ token, user: buildPublicUser(user) });
+    res.status(201).json({ token, user: buildPublicUser(user), trustedDeviceToken });
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
@@ -248,7 +275,9 @@ const signInHandler = async (req, res) => {
     }
 
     const token = signSessionToken(user);
+    const nextTrustedDeviceToken = ensureTrustedDevice(user, req, trustedDeviceToken);
     setAuthCookie(res, user, token);
+    await user.save();
 
     await logActivity({
       user,
@@ -258,7 +287,7 @@ const signInHandler = async (req, res) => {
       metadata: { role: user.role },
     });
 
-    res.status(200).json({ token, user: buildPublicUser(user), trustedDeviceAccepted });
+    res.status(200).json({ token, user: buildPublicUser(user), trustedDeviceAccepted, trustedDeviceToken: nextTrustedDeviceToken });
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
@@ -331,6 +360,47 @@ router.post('/admin/mfa/verify-login', async (req, res) => {
     });
 
     return res.status(200).json({ token, user: buildPublicUser(user), trustedDeviceToken });
+  } catch (err) {
+    return res.status(500).json({ err: err.message });
+  }
+});
+
+router.post('/trusted-session', async (req, res) => {
+  try {
+    const requestedScope = String(req.headers['x-auth-scope'] || req.body.scope || 'user').trim();
+    const role = ['user', 'sales_staff', 'admin'].includes(requestedScope) ? requestedScope : 'user';
+    const trustedDeviceToken = String(req.body.trustedDeviceToken || '').trim();
+    if (!trustedDeviceToken) {
+      return res.status(400).json({ err: 'Trusted device token is required.' });
+    }
+
+    const user = await findUserByTrustedDevice(role, trustedDeviceToken);
+    if (!user) {
+      return res.status(401).json({ err: 'Trusted device is invalid or expired.' });
+    }
+
+    if (user.role === 'admin' && user.mfaEnabled && user.mfaSecretEncrypted && !useTrustedDevice(user, trustedDeviceToken)) {
+      return res.status(401).json({ err: 'Trusted device is invalid or expired.' });
+    }
+
+    user.lastLoginAt = new Date();
+    const token = signSessionToken(user);
+    setAuthCookie(res, user, token);
+    await user.save();
+
+    await logActivity({
+      user,
+      action: 'trusted_session_refreshed',
+      module: 'auth',
+      recordId: user._id,
+      metadata: { role: user.role },
+    });
+
+    return res.status(200).json({
+      token,
+      user: buildPublicUser(user),
+      trustedDeviceToken,
+    });
   } catch (err) {
     return res.status(500).json({ err: err.message });
   }
