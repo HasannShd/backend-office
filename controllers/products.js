@@ -8,6 +8,8 @@ const ExcelJS = require('exceljs');
 
 const router = express.Router();
 
+const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const collectDescendantCategoryIds = async (categoryId) => {
   const rootId = String(categoryId);
   const allCategories = await Category.find({})
@@ -40,6 +42,8 @@ router.get('/', async (req, res) => {
   try {
     const { category, search, featured, page = 1, limit = 20 } = req.query;
     const filter = { isActive: true };
+    const pageNumber = Math.max(Number(page) || 1, 1);
+    const limitNumber = Math.min(Math.max(Number(limit) || 20, 1), 200);
 
     if (category) {
       if (mongoose.isValidObjectId(category)) {
@@ -54,21 +58,31 @@ router.get('/', async (req, res) => {
         filter.categorySlug = { $in: categoryIds };
       }
     }
-    if (search) filter.name = { $regex: search, $options: 'i' };
+    if (search) {
+      const pattern = escapeRegex(search).slice(0, 80);
+      filter.$or = [
+        { name: { $regex: pattern, $options: 'i' } },
+        { brand: { $regex: pattern, $options: 'i' } },
+        { sku: { $regex: pattern, $options: 'i' } },
+      ];
+    }
     if (featured === 'true') filter.featured = true;
 
-    const skip = (Number(page) - 1) * Number(limit);
-    const products = await Product.find(filter)
-      .select('name brand image images basePrice variants.price variants.type variants.sku variants.name variants.image categorySlug featured')
-      .populate({
-        path: 'categorySlug',
-        select: 'name slug parent',
-        populate: { path: 'parent', select: 'name slug' },
-      })
-      .skip(skip)
-      .limit(Number(limit))
-      .lean();
-    const total = await Product.countDocuments(filter);
+    const skip = (pageNumber - 1) * limitNumber;
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .select('name brand image images basePrice variants.price variants.type variants.sku variants.name variants.image categorySlug featured')
+        .populate({
+          path: 'categorySlug',
+          select: 'name slug parent',
+          populate: { path: 'parent', select: 'name slug' },
+        })
+        .sort({ featured: -1, name: 1 })
+        .skip(skip)
+        .limit(limitNumber)
+        .lean(),
+      Product.countDocuments(filter),
+    ]);
 
     res.set('Cache-Control', 'public, max-age=120');
     res.json({ items: products, total });
