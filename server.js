@@ -26,6 +26,7 @@ const uploadRoutes = require('./controllers/uploads');
 const cartRoutes = require('./controllers/cart');
 const orderRoutes = require('./controllers/orders');
 const careersRoutes = require('./controllers/careers');
+const contactRoutes = require('./controllers/contact');
 const staffPortalRoutes = require('./controllers/staffPortal');
 const adminPortalRoutes = require('./controllers/adminPortal');
 const app = express();
@@ -110,8 +111,16 @@ const uploadLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const contactLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter);
+app.use('/api/contact', contactLimiter);
 app.use('/api/upload', uploadLimiter);
 app.use('/api/admin-portal/exports', exportLimiter);
 app.use('/api/staff-portal/orders/export', exportLimiter);
@@ -129,6 +138,7 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/careers', careersRoutes);
+app.use('/api/contact', contactRoutes);
 app.use('/api/staff-portal', staffPortalRoutes);
 app.use('/api/admin-portal', adminPortalRoutes);
 
