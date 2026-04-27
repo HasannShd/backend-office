@@ -234,6 +234,8 @@ Google Drive auth, choose one:
 - Service account:
   - `GDRIVE_SERVICE_ACCOUNT_JSON`
 
+If the backup workflow reports Google `invalid_grant` or says the refresh token is expired or revoked, the database archive was created but Drive upload authentication failed. Regenerate the OAuth refresh token and replace `GDRIVE_OAUTH_REFRESH_TOKEN`, or move to `GDRIVE_SERVICE_ACCOUNT_JSON` and share the target Drive folder with the service account email.
+
 Optional:
 
 - `BACKUP_ENCRYPTION_KEY`

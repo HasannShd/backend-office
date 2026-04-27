@@ -4,6 +4,21 @@ const { google } = require('googleapis');
 
 const readEnv = (key) => String(process.env[key] || '').trim();
 
+const isInvalidGoogleGrant = (err) =>
+  err?.response?.data?.error === 'invalid_grant' ||
+  err?.code === 'invalid_grant' ||
+  err?.message?.includes('invalid_grant');
+
+const getDriveAuthFailureMessage = (err) => {
+  if (!isInvalidGoogleGrant(err)) return '';
+  return [
+    'Google Drive OAuth refresh token is expired or revoked.',
+    'Update the GitHub secret GDRIVE_OAUTH_REFRESH_TOKEN with a newly generated refresh token,',
+    'or switch the workflow to GDRIVE_SERVICE_ACCOUNT_JSON and share the Drive folder with that service account.',
+    'The restore-from-Drive check could not download a backup archive.',
+  ].join(' ');
+};
+
 const ensureEnv = () => {
   const missing = ['GDRIVE_FOLDER_ID', 'BACKUP_DOWNLOAD_DIR'].filter((key) => !readEnv(key));
   if (missing.length) {
@@ -121,7 +136,16 @@ const main = async () => {
   const filename = readEnv('BACKUP_FILENAME');
   const prefix = readEnv('BACKUP_PREFIX');
 
-  const file = await pickBackupFile(drive, folderId, filename, prefix);
+  let file;
+  try {
+    file = await pickBackupFile(drive, folderId, filename, prefix);
+  } catch (err) {
+    const authFailureMessage = getDriveAuthFailureMessage(err);
+    if (authFailureMessage) {
+      throw new Error(authFailureMessage);
+    }
+    throw err;
+  }
 
   if (!file) {
     const descriptor = filename ? `named ${filename}` : `with prefix ${prefix || 'lte-backup'}`;
@@ -146,5 +170,6 @@ if (require.main === module) {
 
 module.exports = {
   ensureEnv,
+  getDriveAuthFailureMessage,
   pickBackupFile,
 };

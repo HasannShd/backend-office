@@ -28,6 +28,21 @@ const ensureEnv = () => {
 
 const isEncryptionEnabled = () => Boolean(readEnv('BACKUP_ENCRYPTION_KEY'));
 
+const isInvalidGoogleGrant = (err) =>
+  err?.response?.data?.error === 'invalid_grant' ||
+  err?.code === 'invalid_grant' ||
+  err?.message?.includes('invalid_grant');
+
+const getDriveAuthFailureMessage = (err) => {
+  if (!isInvalidGoogleGrant(err)) return '';
+  return [
+    'Google Drive OAuth refresh token is expired or revoked.',
+    'Update the GitHub secret GDRIVE_OAUTH_REFRESH_TOKEN with a newly generated refresh token,',
+    'or switch the workflow to GDRIVE_SERVICE_ACCOUNT_JSON and share the Drive folder with that service account.',
+    'The MongoDB backup archive was created and verified, but it was not uploaded to Drive.',
+  ].join(' ');
+};
+
 const getDriveAuth = () => {
   const oauthClientId = readEnv('GDRIVE_OAUTH_CLIENT_ID');
   const oauthClientSecret = readEnv('GDRIVE_OAUTH_CLIENT_SECRET');
@@ -339,10 +354,18 @@ const main = async () => {
     const verifiedCollections = await verifyArchive(finalArchivePath);
     console.log('[backup] Verified archive collections:', verifiedCollections.length);
 
-    const upload = await uploadToDrive(finalArchivePath, folderId);
-    console.log('Backup uploaded:', upload);
-    const metadataUpload = await uploadMetadataToDrive(metadataPath, finalArchivePath, folderId);
-    console.log('Backup metadata uploaded:', metadataUpload);
+    try {
+      const upload = await uploadToDrive(finalArchivePath, folderId);
+      console.log('Backup uploaded:', upload);
+      const metadataUpload = await uploadMetadataToDrive(metadataPath, finalArchivePath, folderId);
+      console.log('Backup metadata uploaded:', metadataUpload);
+    } catch (err) {
+      const authFailureMessage = getDriveAuthFailureMessage(err);
+      if (authFailureMessage) {
+        throw new Error(authFailureMessage);
+      }
+      throw err;
+    }
   } finally {
     await client.close().catch(() => {});
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -366,6 +389,7 @@ module.exports = {
   getLatestAliasFilename,
   getMetadataFilename,
   getMetadataAliasFilename,
+  getDriveAuthFailureMessage,
   isEncryptionEnabled,
   toExtendedJson,
 };

@@ -7,6 +7,7 @@ const {
   getLatestAliasFilename,
   getMetadataFilename,
   getMetadataAliasFilename,
+  getDriveAuthFailureMessage,
   toExtendedJson,
 } = require('../scripts/backupToDrive');
 
@@ -68,6 +69,22 @@ test('getMetadataAliasFilename returns configured alias', () => {
 
   if (typeof original === 'string') process.env.BACKUP_METADATA_ALIAS = original;
   else delete process.env.BACKUP_METADATA_ALIAS;
+});
+
+test('getDriveAuthFailureMessage explains revoked OAuth refresh token', () => {
+  const error = {
+    response: {
+      data: {
+        error: 'invalid_grant',
+        error_description: 'Token has been expired or revoked.',
+      },
+    },
+  };
+
+  const message = getDriveAuthFailureMessage(error);
+
+  assert.match(message, /GDRIVE_OAUTH_REFRESH_TOKEN/);
+  assert.match(message, /created and verified/);
 });
 
 test('toExtendedJson serializes ObjectId and Date values', () => {
