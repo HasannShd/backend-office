@@ -10,6 +10,7 @@
     "migrate:categories": "node scripts/migrateCategoryHierarchy.js",
     "fix:product-spelling": "node scripts/fixProductSpelling.js",
     "fill:category-descriptions": "node scripts/fillCategoryDescriptions.js",
+    "fill:catalog-descriptions": "node scripts/fillCatalogDescriptions.js",
     "backup:drive": "node scripts/backupToDrive.js",
     "restore:backup": "node scripts/restoreFromBackup.js",
     "restore:verify": "RESTORE_VERIFY_ONLY=true node scripts/restoreFromBackup.js",
