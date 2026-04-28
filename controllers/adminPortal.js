@@ -226,7 +226,7 @@ const buildFullExportWorkbook = async () => {
         select: 'name slug parent',
         populate: { path: 'parent', select: 'name slug' },
       })
-      .sort({ name: 1 })
+      .sort({ sortOrder: 1, name: 1 })
       .lean(),
     AttendanceLog.find({})
       .sort({ date: -1, createdAt: -1 })

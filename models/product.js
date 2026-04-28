@@ -51,14 +51,15 @@ const productSchema = new mongoose.Schema(
     variants: [variantSchema],
     featured: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+    sortOrder: { type: Number, default: 1000, index: true },
   },
   { timestamps: true }
 );
 
 productSchema.index({ name: 1 });
 productSchema.index({ categorySlug: 1, isActive: 1 });
-productSchema.index({ isActive: 1, featured: -1, name: 1 });
-productSchema.index({ isActive: 1, name: 1 });
+productSchema.index({ isActive: 1, sortOrder: 1, featured: -1, name: 1 });
+productSchema.index({ isActive: 1, sortOrder: 1, name: 1 });
 productSchema.index({ isActive: 1, brand: 1 });
 productSchema.index({ isActive: 1, sku: 1 });
 

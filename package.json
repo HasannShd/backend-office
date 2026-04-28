@@ -12,6 +12,7 @@
     "fill:category-descriptions": "node scripts/fillCategoryDescriptions.js",
     "fill:catalog-descriptions": "node scripts/fillCatalogDescriptions.js",
     "rearrange:catalog": "node scripts/rearrangeCatalogCategories.js",
+    "improve:catalog": "node scripts/improveCatalogStructure.js",
     "backup:drive": "node scripts/backupToDrive.js",
     "restore:backup": "node scripts/restoreFromBackup.js",
     "restore:verify": "RESTORE_VERIFY_ONLY=true node scripts/restoreFromBackup.js",

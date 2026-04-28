@@ -77,7 +77,7 @@ router.get('/', async (req, res) => {
           select: 'name slug parent',
           populate: { path: 'parent', select: 'name slug' },
         })
-        .sort({ featured: -1, name: 1 })
+        .sort({ sortOrder: 1, featured: -1, name: 1 })
         .skip(skip)
         .limit(limitNumber)
         .lean(),
@@ -104,6 +104,7 @@ router.get('/admin/all', verifyToken, isAdmin, async (req, res) => {
         path: 'categorySlug',
         populate: { path: 'parent', select: 'name slug' },
       })
+      .sort({ sortOrder: 1, name: 1 })
       .lean();
     res.json(products);
   } catch (err) {
@@ -120,7 +121,7 @@ router.get('/admin/export', verifyToken, isAdmin, async (req, res) => {
         select: 'name slug parent',
         populate: { path: 'parent', select: 'name slug' },
       })
-      .sort('name')
+      .sort({ sortOrder: 1, name: 1 })
       .lean();
     const categories = await Category.find({})
       .select('name slug parent sortOrder')
