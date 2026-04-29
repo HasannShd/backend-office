@@ -14,6 +14,7 @@
     "rearrange:catalog": "node scripts/rearrangeCatalogCategories.js",
     "improve:catalog": "node scripts/improveCatalogStructure.js",
     "flatten:catalog": "node scripts/flattenCatalogToMainCategories.js",
+    "restore:consumables": "node scripts/restoreConsumablesSubcategories.js",
     "backup:drive": "node scripts/backupToDrive.js",
     "restore:backup": "node scripts/restoreFromBackup.js",
     "restore:verify": "RESTORE_VERIFY_ONLY=true node scripts/restoreFromBackup.js",
