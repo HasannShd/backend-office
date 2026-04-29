@@ -10,6 +10,35 @@ const router = express.Router();
 
 const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const normalizeSpreadsheetBoolean = (value) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (['true', '1', 'yes', 'y', 'active', 'featured', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'n', 'inactive', 'off'].includes(normalized)) return false;
+  return undefined;
+};
+
+const normalizeReviewAction = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (['remove', 'delete', 'deactivate', 'archive', 'inactive'].includes(normalized)) return 'deactivate';
+  if (['add', 'new', 'create'].includes(normalized)) return 'add';
+  if (['update', 'edit', 'change'].includes(normalized)) return 'update';
+  if (['keep', 'leave', 'ok'].includes(normalized)) return 'keep';
+  if (['skip', 'ignore'].includes(normalized)) return 'skip';
+  return normalized;
+};
+
+const formatIsoDate = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString();
+};
+
 const collectDescendantCategoryIds = async (categoryId) => {
   const rootId = String(categoryId);
   const allCategories = await Category.find({})
@@ -130,27 +159,77 @@ router.get('/admin/export', verifyToken, isAdmin, async (req, res) => {
       .lean();
 
     const workbook = new ExcelJS.Workbook();
+    const instructionsSheet = workbook.addWorksheet('Instructions');
     const productSheet = workbook.addWorksheet('Products');
     const categorySheet = workbook.addWorksheet('Categories');
 
+    instructionsSheet.columns = [
+      { header: 'Field', key: 'field', width: 24 },
+      { header: 'How to use it', key: 'guidance', width: 96 },
+    ];
+    instructionsSheet.addRows([
+      {
+        field: 'ReviewAction',
+        guidance: 'Leave blank to keep as-is. Use add for new items, update for changed items, or remove/deactivate to turn an item inactive without deleting history.',
+      },
+      {
+        field: 'ReviewNotes',
+        guidance: 'Optional internal note for the reviewer. This column is ignored on import.',
+      },
+      {
+        field: 'Import format',
+        guidance: 'Review in Excel, then export the edited Products sheet as CSV before uploading it back into Admin Import.',
+      },
+      {
+        field: 'Safe removal',
+        guidance: 'Items marked remove or deactivate are set inactive in the catalog instead of being permanently deleted.',
+      },
+    ]);
+
     productSheet.columns = [
+      { header: 'ProductId', key: 'productId', width: 28 },
+      { header: 'ReviewAction', key: 'reviewAction', width: 18 },
+      { header: 'ReviewNotes', key: 'reviewNotes', width: 28 },
+      { header: 'IsActive', key: 'isActive', width: 12 },
+      { header: 'Featured', key: 'featured', width: 12 },
       { header: 'Category', key: 'category', width: 32 },
       { header: 'ParentCategory', key: 'parentCategory', width: 32 },
+      { header: 'CategoryPath', key: 'categoryPath', width: 44 },
       { header: 'Product', key: 'product', width: 44 },
       { header: 'Brand', key: 'brand', width: 24 },
+      { header: 'SKU', key: 'sku', width: 24 },
       { header: 'Image', key: 'image', width: 32 },
+      { header: 'GalleryImageCount', key: 'galleryImageCount', width: 18 },
+      { header: 'VariantCount', key: 'variantCount', width: 14 },
+      { header: 'SpecCount', key: 'specCount', width: 12 },
       { header: 'Price', key: 'price', width: 12 },
       { header: 'Description', key: 'description', width: 44 },
+      { header: 'SortOrder', key: 'sortOrder', width: 12 },
+      { header: 'CreatedAt', key: 'createdAt', width: 24 },
+      { header: 'UpdatedAt', key: 'updatedAt', width: 24 },
       { header: 'CategorySlug', key: 'categorySlug', width: 32 },
     ];
     productSheet.addRows(products.map(product => ({
+      productId: String(product._id || ''),
+      reviewAction: '',
+      reviewNotes: '',
+      isActive: product.isActive !== false ? 'true' : 'false',
+      featured: product.featured ? 'true' : 'false',
       category: product.categorySlug?.name || '',
       parentCategory: product.categorySlug?.parent?.name || '',
+      categoryPath: [product.categorySlug?.parent?.name, product.categorySlug?.name].filter(Boolean).join(' > '),
       product: product.name || '',
       brand: product.brand || '',
+      sku: product.sku || '',
       image: product.image || '',
+      galleryImageCount: Array.isArray(product.images) ? product.images.filter(Boolean).length : 0,
+      variantCount: Array.isArray(product.variants) ? product.variants.length : 0,
+      specCount: Array.isArray(product.specs) ? product.specs.length : 0,
       price: product.basePrice ?? '',
       description: product.description || '',
+      sortOrder: product.sortOrder ?? '',
+      createdAt: formatIsoDate(product.createdAt),
+      updatedAt: formatIsoDate(product.updatedAt),
       categorySlug: product.categorySlug?.slug || '',
     })));
 
@@ -158,17 +237,19 @@ router.get('/admin/export', verifyToken, isAdmin, async (req, res) => {
       { header: 'Category', key: 'category', width: 32 },
       { header: 'ParentCategory', key: 'parentCategory', width: 32 },
       { header: 'CategorySlug', key: 'categorySlug', width: 32 },
+      { header: 'SortOrder', key: 'sortOrder', width: 12 },
     ];
     categorySheet.addRows(categories.map(category => ({
       category: category.name || '',
       parentCategory: category.parent?.name || '',
       categorySlug: category.slug || '',
+      sortOrder: category.sortOrder ?? '',
     })));
 
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
 
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.set('Content-Disposition', 'attachment; filename="products-categories.xlsx"');
+    res.set('Content-Disposition', 'attachment; filename="products-review-sheet.xlsx"');
     res.status(200).send(buffer);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -180,6 +261,7 @@ router.post('/import', verifyToken, isAdmin, async (req, res) => {
   const items = Array.isArray(req.body.items) ? req.body.items : [];
   const prepared = items
     .map(item => ({
+      productId: String(item.productId || '').trim(),
       name: String(item.name || '').trim(),
       categorySlug: item.categorySlug,
       description: item.description,
@@ -189,8 +271,9 @@ router.post('/import', verifyToken, isAdmin, async (req, res) => {
       basePrice: item.basePrice,
       featured: item.featured,
       isActive: item.isActive,
+      reviewAction: normalizeReviewAction(item.reviewAction),
     }))
-    .filter(item => item.name && item.categorySlug);
+    .filter(item => (item.name && item.categorySlug) || (mongoose.isValidObjectId(item.productId) && item.reviewAction === 'deactivate'));
 
   try {
     if (!items.length) {
@@ -206,23 +289,28 @@ router.post('/import', verifyToken, isAdmin, async (req, res) => {
 
     const ops = prepared.map(item => {
       const update = {
-        name: item.name,
-        categorySlug: item.categorySlug,
       };
+      if (hasValue(item.name)) update.name = item.name;
+      if (item.categorySlug) update.categorySlug = item.categorySlug;
       if (hasValue(item.description)) update.description = item.description;
       if (hasValue(item.brand)) update.brand = item.brand;
       if (hasValue(item.sku)) update.sku = item.sku;
       if (hasValue(item.image)) update.image = item.image;
       if (hasNumber(item.basePrice)) update.basePrice = Number(item.basePrice);
-      if (item.featured !== undefined) update.featured = !!item.featured;
-      if (item.isActive !== undefined) update.isActive = item.isActive !== false;
+      const normalizedFeatured = normalizeSpreadsheetBoolean(item.featured);
+      const normalizedActive = normalizeSpreadsheetBoolean(item.isActive);
+      if (normalizedFeatured !== undefined) update.featured = normalizedFeatured;
+      if (normalizedActive !== undefined) update.isActive = normalizedActive;
+      if (item.reviewAction === 'deactivate') update.isActive = false;
 
       return {
         updateOne: {
-          filter: {
-            categorySlug: item.categorySlug,
-            name: { $regex: `^${escapeRegex(item.name.trim())}$`, $options: 'i' },
-          },
+          filter: mongoose.isValidObjectId(item.productId)
+            ? { _id: item.productId }
+            : {
+                categorySlug: item.categorySlug,
+                name: { $regex: `^${escapeRegex(item.name.trim())}$`, $options: 'i' },
+              },
           update: { $set: update },
           upsert: true,
         },
