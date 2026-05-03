@@ -1,5 +1,4 @@
 const COMPANY_NAME = 'Leading Trading Est';
-const COMPANY_ADDRESS = 'Warehousing World, Um Al-Baidh, Sitra, Bahrain';
 const COMPANY_EMAIL = process.env.COMPANY_EMAIL || 'admin@lte-bh.com';
 const API_URL = (
   process.env.PUBLIC_API_URL ||
@@ -40,23 +39,26 @@ const renderSocialFollowEmail = ({ contact, subject, previewText, instagramUrl, 
   const text = [
     greeting,
     '',
-    `We would like to stay connected with ${clientReference} through Leading Trading Est updates, product highlights, and sourcing news.`,
+    `We would like to stay connected with ${clientReference} through our official Leading Trading Est social pages, where we will share company news and general updates from our team.`,
     '',
     instagramUrl ? `Instagram: ${instagramUrl}` : '',
     linkedinUrl ? `LinkedIn: ${linkedinUrl}` : '',
     '',
-    `You are receiving this because your email is listed with ${COMPANY_NAME} for business communication.`,
-    `Unsubscribe from future marketing emails: ${unsubscribeUrl}`,
+    'We appreciate your continued trust and support, and we look forward to staying connected.',
     '',
+    'Best regards,',
     `${COMPANY_NAME}`,
-    COMPANY_ADDRESS,
     COMPANY_EMAIL,
+    '+973 17210665',
+    'https://www.lte-bh.com',
+    '',
+    `To stop receiving these updates: ${unsubscribeUrl}`,
   ].filter(Boolean).join('\n');
 
   const html = `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background:#f4f1eb;font-family:Arial,sans-serif;color:#102033;">
-    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml(previewText || 'Follow Leading Trading Est for product and sourcing updates.')}</div>
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml(previewText || 'A quick note from Leading Trading Est.')}</div>
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f1eb;padding:24px 12px;">
       <tr>
         <td align="center">
@@ -70,7 +72,7 @@ const renderSocialFollowEmail = ({ contact, subject, previewText, instagramUrl, 
             <tr>
               <td style="padding:0 28px 8px;font-size:15px;line-height:1.7;color:#344256;">
                 <p style="margin:0 0 14px;">${escapeHtml(greeting)}</p>
-                <p style="margin:0 0 16px;">We would like to stay connected with ${escapeHtml(clientReference)} through LTE product updates, sourcing news, and company announcements for Bahrain medical, dental, and industrial supply.</p>
+                <p style="margin:0 0 16px;">We would like to stay connected with ${escapeHtml(clientReference)} through our official Leading Trading Est social pages, where we will share company news and general updates from our team.</p>
                 <p style="margin:0;">Follow our official pages below.</p>
               </td>
             </tr>
@@ -82,9 +84,10 @@ const renderSocialFollowEmail = ({ contact, subject, previewText, instagramUrl, 
             </tr>
             <tr>
               <td style="padding:18px 28px;background:#f8f4ed;font-size:12px;line-height:1.6;color:#687383;">
-                <p style="margin:0 0 8px;">You are receiving this business update because your email is listed with ${escapeHtml(COMPANY_NAME)}.</p>
-                <p style="margin:0 0 8px;"><a href="${escapeHtml(unsubscribeUrl)}" style="color:#1d4f91;">Unsubscribe from future marketing emails</a></p>
-                <p style="margin:0;">${escapeHtml(COMPANY_NAME)} · ${escapeHtml(COMPANY_ADDRESS)} · <a href="mailto:${escapeHtml(COMPANY_EMAIL)}" style="color:#1d4f91;">${escapeHtml(COMPANY_EMAIL)}</a></p>
+                <p style="margin:0 0 12px;color:#344256;font-size:14px;">We appreciate your continued trust and support, and we look forward to staying connected.</p>
+                <p style="margin:0 0 6px;"><strong>${escapeHtml(COMPANY_NAME)}</strong></p>
+                <p style="margin:0 0 8px;"><a href="mailto:${escapeHtml(COMPANY_EMAIL)}" style="color:#1d4f91;">${escapeHtml(COMPANY_EMAIL)}</a> · +973 17210665 · <a href="https://www.lte-bh.com" style="color:#1d4f91;">www.lte-bh.com</a></p>
+                <p style="margin:10px 0 0;font-size:11px;color:#8a95a4;">To stop receiving these updates, <a href="${escapeHtml(unsubscribeUrl)}" style="color:#6b7480;">unsubscribe here</a>.</p>
               </td>
             </tr>
           </table>

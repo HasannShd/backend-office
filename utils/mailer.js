@@ -24,15 +24,17 @@ if (isConfigured) {
   });
 }
 
-const sendMail = async ({ to, subject, text, html, attachments }) => {
+const sendMail = async ({ to, subject, text, html, attachments, cc, from, replyTo }) => {
   if (!transporter) {
     console.log('[mailer] Email not sent (SMTP not configured):', subject);
     return { skipped: true };
   }
 
   return transporter.sendMail({
-    from: SMTP_FROM,
+    from: from || SMTP_FROM,
     to,
+    cc,
+    replyTo,
     subject,
     text,
     html,

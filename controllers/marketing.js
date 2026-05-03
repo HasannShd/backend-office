@@ -12,6 +12,8 @@ const { renderSocialFollowEmail } = require('../utils/marketing-email');
 
 const INSTAGRAM_URL = 'https://www.instagram.com/leadingtradingest/';
 const LINKEDIN_URL = 'https://www.linkedin.com/company/leading-trading-est/';
+const CAMPAIGN_FROM = 'hrleading1@gmail.com';
+const CAMPAIGN_CC = 'admin@lte-bh.com';
 const MAX_IMPORT_ROWS = 2000;
 const MAX_SEND_PER_REQUEST = 1000;
 
@@ -154,8 +156,8 @@ router.post('/contacts/sync-clients', verifyToken, isAdmin, async (req, res) => 
 });
 
 router.post('/campaigns/social-follow/send', verifyToken, isAdmin, async (req, res) => {
-  const subject = clean(req.body?.subject || 'Follow Leading Trading Est for product updates', 160);
-  const previewText = clean(req.body?.previewText || 'Stay connected with LTE on Instagram and LinkedIn.', 220);
+  const subject = clean(req.body?.subject || 'Stay Connected With Leading Trading Est', 160);
+  const previewText = clean(req.body?.previewText || 'A quick note from Leading Trading Est.', 220);
   const instagramUrl = clean(req.body?.instagramUrl || INSTAGRAM_URL, 300);
   const linkedinUrl = clean(req.body?.linkedinUrl || LINKEDIN_URL, 300);
 
@@ -199,7 +201,15 @@ router.post('/campaigns/social-follow/send', verifyToken, isAdmin, async (req, r
 
       try {
         const { text, html } = renderSocialFollowEmail({ contact, subject, previewText, instagramUrl, linkedinUrl });
-        const result = await sendMail({ to: contact.email, subject, text, html });
+        const result = await sendMail({
+          from: CAMPAIGN_FROM,
+          to: contact.email,
+          cc: CAMPAIGN_CC,
+          replyTo: CAMPAIGN_CC,
+          subject,
+          text,
+          html,
+        });
         if (result?.skipped) {
           recipient.status = 'skipped';
           recipient.error = 'SMTP not configured';
