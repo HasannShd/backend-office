@@ -30,7 +30,6 @@ marketingContactSchema.pre('validate', function assignUnsubscribeToken(next) {
   next();
 });
 
-marketingContactSchema.index({ email: 1 });
 marketingContactSchema.index({ unsubscribedAt: 1, updatedAt: -1 });
 
 module.exports = mongoose.model('MarketingContact', marketingContactSchema);
