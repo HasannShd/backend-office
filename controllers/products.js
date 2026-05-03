@@ -5,8 +5,13 @@ const Category = require('../models/category');
 const verifyToken = require('../middleware/verify-token');
 const isAdmin = require('../middleware/is-admin');
 const ExcelJS = require('exceljs');
+const multer = require('multer');
 
 const router = express.Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+});
 
 const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -39,6 +44,170 @@ const formatIsoDate = (value) => {
   return date.toISOString();
 };
 
+const getCellValue = (cell) => {
+  const value = cell?.value;
+  if (value === null || typeof value === 'undefined') return '';
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'object') {
+    if (value.text) return String(value.text);
+    if (value.hyperlink) return String(value.hyperlink);
+    if (Array.isArray(value.richText)) return value.richText.map(part => part.text || '').join('');
+    if (value.result !== undefined) return String(value.result);
+    return String(value);
+  }
+  return String(value);
+};
+
+const normalizeHeader = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+const headerAliases = {
+  productId: ['productid', 'id'],
+  reviewAction: ['reviewaction', 'action'],
+  isActive: ['isactive', 'active', 'status'],
+  featured: ['featured'],
+  category: ['category', 'categoryname'],
+  parentCategory: ['parentcategory', 'parent'],
+  categoryPath: ['categorypath', 'path'],
+  product: ['product', 'productname', 'name', 'item'],
+  brand: ['brand'],
+  sku: ['sku', 'itemcode', 'code'],
+  image: ['image', 'imageurl'],
+  basePrice: ['price', 'baseprice'],
+  description: ['description', 'desc'],
+  sortOrder: ['sortorder', 'sort'],
+  categorySlug: ['categoryslug', 'slug'],
+};
+
+const findHeaderIndex = (headers, aliases) =>
+  headers.findIndex(header => aliases.includes(normalizeHeader(header)));
+
+const parseCsvText = (text) => {
+  const rows = [];
+  let currentCell = '';
+  let currentRow = [];
+  let inQuotes = false;
+
+  const pushCell = () => {
+    currentRow.push(currentCell.trim());
+    currentCell = '';
+  };
+
+  const pushRow = () => {
+    if (currentRow.some(cell => cell)) rows.push(currentRow);
+    currentRow = [];
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const nextChar = text[index + 1];
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        currentCell += '"';
+        index += 1;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && char === ',') {
+      pushCell();
+      continue;
+    }
+    if (!inQuotes && (char === '\n' || char === '\r')) {
+      pushCell();
+      pushRow();
+      if (char === '\r' && nextChar === '\n') index += 1;
+      continue;
+    }
+    currentCell += char;
+  }
+
+  if (currentCell || currentRow.length) {
+    pushCell();
+    pushRow();
+  }
+
+  return rows;
+};
+
+const rowsToImportItems = (rows) => {
+  const cleaned = rows
+    .map(row => row.map(cell => String(cell ?? '').trim()))
+    .filter(row => row.some(Boolean));
+  if (!cleaned.length) return [];
+
+  const headerIndex = cleaned.findIndex(row => {
+    const normalized = row.map(normalizeHeader);
+    return normalized.includes('product') || normalized.includes('productid') || normalized.includes('category');
+  });
+  if (headerIndex < 0) return [];
+
+  const headers = cleaned[headerIndex];
+  const dataRows = cleaned.slice(headerIndex + 1);
+  const indexes = Object.fromEntries(
+    Object.entries(headerAliases).map(([key, aliases]) => [key, findHeaderIndex(headers, aliases)])
+  );
+
+  const pick = (row, key) => {
+    const index = indexes[key];
+    return index >= 0 ? String(row[index] ?? '').trim() : '';
+  };
+  const hasColumn = (key) => indexes[key] >= 0;
+
+  return dataRows
+    .map(row => ({
+      productId: pick(row, 'productId'),
+      reviewAction: pick(row, 'reviewAction'),
+      isActive: hasColumn('isActive') ? pick(row, 'isActive') : undefined,
+      featured: hasColumn('featured') ? pick(row, 'featured') : undefined,
+      category: pick(row, 'category'),
+      parentCategory: pick(row, 'parentCategory'),
+      categoryPath: pick(row, 'categoryPath'),
+      name: pick(row, 'product'),
+      brand: hasColumn('brand') ? pick(row, 'brand') : undefined,
+      sku: hasColumn('sku') ? pick(row, 'sku') : undefined,
+      image: hasColumn('image') ? pick(row, 'image') : undefined,
+      basePrice: hasColumn('basePrice') ? pick(row, 'basePrice') : undefined,
+      description: hasColumn('description') ? pick(row, 'description') : undefined,
+      sortOrder: hasColumn('sortOrder') ? pick(row, 'sortOrder') : undefined,
+      categorySlug: pick(row, 'categorySlug'),
+      _sourceFields: {
+        brand: hasColumn('brand'),
+        sku: hasColumn('sku'),
+        image: hasColumn('image'),
+        basePrice: hasColumn('basePrice'),
+        description: hasColumn('description'),
+        sortOrder: hasColumn('sortOrder'),
+        featured: hasColumn('featured'),
+        isActive: hasColumn('isActive'),
+      },
+    }))
+    .filter(item => item.productId || item.name || item.category || item.categorySlug);
+};
+
+const loadImportFileItems = async (file) => {
+  const filename = String(file?.originalname || '').toLowerCase();
+  if (filename.endsWith('.csv')) {
+    return rowsToImportItems(parseCsvText(file.buffer.toString('utf8').replace(/^\uFEFF/, '')));
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(file.buffer);
+  const worksheet = workbook.getWorksheet('Products') || workbook.worksheets.find(sheet => normalizeHeader(sheet.name) !== 'instructions') || workbook.worksheets[0];
+  if (!worksheet) return [];
+
+  const rows = [];
+  worksheet.eachRow({ includeEmpty: false }, (row) => {
+    const values = [];
+    const maxCell = row.actualCellCount || row.cellCount || 0;
+    for (let index = 1; index <= maxCell; index += 1) {
+      values.push(getCellValue(row.getCell(index)));
+    }
+    rows.push(values);
+  });
+  return rowsToImportItems(rows);
+};
+
 const collectDescendantCategoryIds = async (categoryId) => {
   const rootId = String(categoryId);
   const allCategories = await Category.find({})
@@ -66,6 +235,175 @@ const collectDescendantCategoryIds = async (categoryId) => {
 
 const setFreshCatalogHeaders = (res) => {
   res.set('Cache-Control', 'no-store, max-age=0, must-revalidate');
+};
+
+const buildCategoryLookup = async () => {
+  const categories = await Category.find({})
+    .select('name slug parent')
+    .populate('parent', 'name slug')
+    .lean();
+  const map = new Map();
+  const add = (value, id) => {
+    const key = String(value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+    if (key) map.set(key, String(id));
+  };
+
+  categories.forEach(category => {
+    add(category._id, category._id);
+    add(category.name, category._id);
+    add(category.slug, category._id);
+    add([category.parent?.name, category.name].filter(Boolean).join(' > '), category._id);
+    add([category.parent?.slug, category.slug].filter(Boolean).join(' > '), category._id);
+  });
+
+  return map;
+};
+
+const resolveCategoryId = (item, categoryLookup) => {
+  if (mongoose.isValidObjectId(item.categorySlug)) return String(item.categorySlug);
+  const candidates = [
+    item.categorySlug,
+    item.category,
+    item.categoryRaw,
+    item.categoryPath,
+    [item.parentCategory, item.category].filter(Boolean).join(' > '),
+  ];
+
+  for (const candidate of candidates) {
+    const key = String(candidate || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+    if (key && categoryLookup.has(key)) return categoryLookup.get(key);
+  }
+  return '';
+};
+
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+
+const processProductImportItems = async (rawItems = []) => {
+  const categoryLookup = await buildCategoryLookup();
+  const skipped = [];
+  const prepared = [];
+
+  rawItems.forEach((rawItem, index) => {
+    const reviewAction = normalizeReviewAction(rawItem.reviewAction);
+    if (reviewAction === 'skip') {
+      skipped.push({ row: index + 1, reason: 'Marked skip' });
+      return;
+    }
+
+    const item = {
+      ...rawItem,
+      productId: String(rawItem.productId || '').trim(),
+      name: String(rawItem.name || rawItem.product || '').trim(),
+      categorySlug: resolveCategoryId(rawItem, categoryLookup),
+      reviewAction,
+      _rowNumber: index + 1,
+    };
+
+    if (item.reviewAction === 'deactivate' && mongoose.isValidObjectId(item.productId)) {
+      prepared.push(item);
+      return;
+    }
+
+    if (!item.name || !item.categorySlug) {
+      skipped.push({
+        row: item._rowNumber,
+        product: item.name,
+        reason: !item.name ? 'Missing product name' : 'Category not matched',
+      });
+      return;
+    }
+
+    prepared.push(item);
+  });
+
+  let inserted = 0;
+  let updated = 0;
+  let matched = 0;
+  const seenKeys = new Set();
+
+  for (const item of prepared) {
+    const sourceFields = item._sourceFields || {};
+    const update = {};
+
+    if (item.name) update.name = item.name;
+    if (item.categorySlug) update.categorySlug = item.categorySlug;
+
+    const setStringField = (key) => {
+      if (sourceFields[key] || hasOwn(item, key)) {
+        update[key] = String(item[key] ?? '').trim();
+      }
+    };
+
+    setStringField('description');
+    setStringField('brand');
+    setStringField('sku');
+    setStringField('image');
+
+    if (sourceFields.basePrice || hasOwn(item, 'basePrice')) {
+      const price = Number(item.basePrice);
+      update.basePrice = Number.isFinite(price) ? price : 0;
+    }
+
+    if (sourceFields.sortOrder || hasOwn(item, 'sortOrder')) {
+      const sortOrder = Number(item.sortOrder);
+      if (Number.isFinite(sortOrder)) update.sortOrder = sortOrder;
+    }
+
+    const normalizedFeatured = normalizeSpreadsheetBoolean(item.featured);
+    const normalizedActive = normalizeSpreadsheetBoolean(item.isActive);
+    if (normalizedFeatured !== undefined) update.featured = normalizedFeatured;
+    if (normalizedActive !== undefined) update.isActive = normalizedActive;
+    if (item.reviewAction === 'deactivate') update.isActive = false;
+
+    const sku = String(item.sku || '').trim();
+    const nameKey = `${item.categorySlug}:${item.name.toLowerCase()}`;
+    const importKey = mongoose.isValidObjectId(item.productId)
+      ? `id:${item.productId}`
+      : sku
+        ? `sku:${sku.toLowerCase()}`
+        : `name:${nameKey}`;
+    if (seenKeys.has(importKey)) {
+      skipped.push({ row: item._rowNumber, product: item.name, reason: 'Duplicate row in import file' });
+      continue;
+    }
+    seenKeys.add(importKey);
+
+    const filters = [];
+    if (mongoose.isValidObjectId(item.productId)) filters.push({ _id: item.productId });
+    if (sku) filters.push({ sku: { $regex: `^${escapeRegex(sku)}$`, $options: 'i' } });
+    if (item.name && item.categorySlug) {
+      filters.push({
+        categorySlug: item.categorySlug,
+        name: { $regex: `^${escapeRegex(item.name)}$`, $options: 'i' },
+      });
+    }
+
+    const existing = filters.length ? await Product.findOne({ $or: filters }).select('_id').lean() : null;
+    if (existing?._id) {
+      matched += 1;
+      const result = await Product.updateOne({ _id: existing._id }, { $set: update });
+      if (result.modifiedCount) updated += 1;
+      continue;
+    }
+
+    if (item.reviewAction === 'deactivate') {
+      skipped.push({ row: item._rowNumber, product: item.name, reason: 'No matching product to deactivate' });
+      continue;
+    }
+
+    await Product.create(update);
+    inserted += 1;
+  }
+
+  return {
+    inserted,
+    updated,
+    matched,
+    skipped: skipped.length,
+    skippedRows: skipped.slice(0, 25),
+    attempted: rawItems.length,
+    processed: prepared.length,
+  };
 };
 
 // ---------- PUBLIC ROUTES ----------
@@ -182,11 +520,15 @@ router.get('/admin/export', verifyToken, isAdmin, async (req, res) => {
       },
       {
         field: 'Import format',
-        guidance: 'Review in Excel, then export the edited Products sheet as CSV before uploading it back into Admin Import.',
+        guidance: 'Review in Excel and upload this same .xlsx file back into Admin Import. You can also upload a CSV exported from the Products sheet.',
       },
       {
         field: 'Safe removal',
-        guidance: 'Items marked remove or deactivate are set inactive in the catalog instead of being permanently deleted.',
+        guidance: 'Do not delete rows to remove products. Keep the row and mark ReviewAction as remove/deactivate, or set IsActive to false. The product is set inactive instead of permanently deleted.',
+      },
+      {
+        field: 'Duplicate protection',
+        guidance: 'Existing products are matched by ProductId first, then SKU, then Product + Category. Keep ProductId and SKU columns unchanged unless you are intentionally adding a new item.',
       },
     ]);
 
@@ -262,81 +604,38 @@ router.get('/admin/export', verifyToken, isAdmin, async (req, res) => {
 
 // Bulk import products (admin)
 router.post('/import', verifyToken, isAdmin, async (req, res) => {
-  const items = Array.isArray(req.body.items) ? req.body.items : [];
-  const prepared = items
-    .map(item => ({
-      productId: String(item.productId || '').trim(),
-      name: String(item.name || '').trim(),
-      categorySlug: item.categorySlug,
-      description: item.description,
-      brand: item.brand,
-      sku: item.sku,
-      image: item.image,
-      basePrice: item.basePrice,
-      featured: item.featured,
-      isActive: item.isActive,
-      reviewAction: normalizeReviewAction(item.reviewAction),
-    }))
-    .filter(item => (item.name && item.categorySlug) || (mongoose.isValidObjectId(item.productId) && item.reviewAction === 'deactivate'));
-
   try {
+    const items = Array.isArray(req.body.items) ? req.body.items : [];
     if (!items.length) {
       return res.status(400).json({ message: 'No items provided' });
     }
-    if (!prepared.length) {
-      return res.status(400).json({ message: 'No valid items to import' });
-    }
-
-    const hasValue = (value) => String(value || '').trim().length > 0;
-    const hasNumber = (value) => value !== null && value !== undefined && value !== '' && !Number.isNaN(Number(value));
-    const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    const ops = prepared.map(item => {
-      const update = {
-      };
-      if (hasValue(item.name)) update.name = item.name;
-      if (item.categorySlug) update.categorySlug = item.categorySlug;
-      if (hasValue(item.description)) update.description = item.description;
-      if (hasValue(item.brand)) update.brand = item.brand;
-      if (hasValue(item.sku)) update.sku = item.sku;
-      if (hasValue(item.image)) update.image = item.image;
-      if (hasNumber(item.basePrice)) update.basePrice = Number(item.basePrice);
-      const normalizedFeatured = normalizeSpreadsheetBoolean(item.featured);
-      const normalizedActive = normalizeSpreadsheetBoolean(item.isActive);
-      if (normalizedFeatured !== undefined) update.featured = normalizedFeatured;
-      if (normalizedActive !== undefined) update.isActive = normalizedActive;
-      if (item.reviewAction === 'deactivate') update.isActive = false;
-
-      return {
-        updateOne: {
-          filter: mongoose.isValidObjectId(item.productId)
-            ? { _id: item.productId }
-            : {
-                categorySlug: item.categorySlug,
-                name: { $regex: `^${escapeRegex(item.name.trim())}$`, $options: 'i' },
-              },
-          update: { $set: update },
-          upsert: true,
-        },
-      };
-    });
-
-    const result = await Product.bulkWrite(ops, { ordered: false });
-    return res.status(200).json({
-      inserted: result.upsertedCount || 0,
-      updated: result.modifiedCount || 0,
-      matched: result.matchedCount || 0,
-      attempted: prepared.length,
-    });
+    const result = await processProductImportItems(items);
+    return res.status(200).json(result);
   } catch (err) {
-    if (err?.writeErrors?.length) {
-      return res.status(200).json({
-        inserted: err.result?.nInserted || 0,
-        attempted: prepared.length,
-        errors: err.writeErrors.map(e => e.errmsg),
-      });
-    }
     return res.status(400).json({ message: err.message });
+  }
+});
+
+router.post('/import-file', verifyToken, isAdmin, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    const filename = String(req.file.originalname || '').toLowerCase();
+    if (!filename.endsWith('.xlsx') && !filename.endsWith('.csv')) {
+      return res.status(400).json({ message: 'Upload the exported .xlsx review sheet or a CSV file.' });
+    }
+
+    const items = await loadImportFileItems(req.file);
+    if (!items.length) {
+      return res.status(400).json({ message: 'No importable product rows found. Use the exported Products sheet format.' });
+    }
+
+    const result = await processProductImportItems(items);
+    return res.status(200).json(result);
+  } catch (err) {
+    return res.status(400).json({ message: err.message || 'Import file failed' });
   }
 });
 
