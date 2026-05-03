@@ -27,6 +27,7 @@ const cartRoutes = require('./controllers/cart');
 const orderRoutes = require('./controllers/orders');
 const careersRoutes = require('./controllers/careers');
 const contactRoutes = require('./controllers/contact');
+const marketingRoutes = require('./controllers/marketing');
 const staffPortalRoutes = require('./controllers/staffPortal');
 const adminPortalRoutes = require('./controllers/adminPortal');
 const app = express();
@@ -118,9 +119,17 @@ const contactLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const marketingSendLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 6,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter);
 app.use('/api/contact', contactLimiter);
+app.use('/api/marketing/campaigns/social-follow/send', marketingSendLimiter);
 app.use('/api/upload', uploadLimiter);
 app.use('/api/admin-portal/exports', exportLimiter);
 app.use('/api/admin-portal/full-export', exportLimiter);
@@ -142,6 +151,7 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/careers', careersRoutes);
 app.use('/api/contact', contactRoutes);
+app.use('/api/marketing', marketingRoutes);
 app.use('/api/staff-portal', staffPortalRoutes);
 app.use('/api/admin-portal', adminPortalRoutes);
 
