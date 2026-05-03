@@ -30,6 +30,7 @@ const contactRoutes = require('./controllers/contact');
 const marketingRoutes = require('./controllers/marketing');
 const staffPortalRoutes = require('./controllers/staffPortal');
 const adminPortalRoutes = require('./controllers/adminPortal');
+const { privateDataHeaders, rejectUnsafeMongoKeys } = require('./middleware/security-guards');
 const app = express();
 const port = process.env.PORT || 5000;
 let mongoReady = false;
@@ -72,15 +73,25 @@ const corsOptions = {
     if (!origin || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-    return callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    return callback(new Error('Origin is not allowed by CORS'));
   },
   credentials: true,
+  optionsSuccessStatus: 204,
 };
 
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  referrerPolicy: { policy: 'no-referrer' },
+  hsts: process.env.NODE_ENV === 'production'
+    ? { maxAge: 15552000, includeSubDomains: true, preload: false }
+    : false,
+}));
 app.use(cors(corsOptions));
 app.use(compression());
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use(privateDataHeaders);
+app.use(rejectUnsafeMongoKeys);
 
 const authLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,

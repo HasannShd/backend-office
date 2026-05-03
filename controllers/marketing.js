@@ -262,10 +262,15 @@ router.get('/unsubscribe/:token', async (req, res) => {
       <html><head><title>Unsubscribed | Leading Trading Est</title></head>
       <body style="font-family:Arial,sans-serif;padding:32px;line-height:1.6;color:#102033;">
         <h1>Unsubscribed</h1>
-        <p>You have been removed from future Leading Trading Est marketing emails.</p>
+        <p>If this email address was subscribed, it has been removed from future Leading Trading Est marketing emails.</p>
       </body></html>`);
   } catch (err) {
-    res.status(500).send('Unable to process unsubscribe request.');
+    res.type('html').send(`<!doctype html>
+      <html><head><title>Unsubscribed | Leading Trading Est</title></head>
+      <body style="font-family:Arial,sans-serif;padding:32px;line-height:1.6;color:#102033;">
+        <h1>Unsubscribed</h1>
+        <p>If this email address was subscribed, it has been removed from future Leading Trading Est marketing emails.</p>
+      </body></html>`);
   }
 });
 
