@@ -64,11 +64,16 @@ const collectDescendantCategoryIds = async (categoryId) => {
   return Array.from(descendants);
 };
 
+const setFreshCatalogHeaders = (res) => {
+  res.set('Cache-Control', 'no-store, max-age=0, must-revalidate');
+};
+
 // ---------- PUBLIC ROUTES ----------
 
 // Get all products (with optional filters)
 router.get('/', async (req, res) => {
   try {
+    setFreshCatalogHeaders(res);
     const { category, search, featured, page = 1, limit = 20 } = req.query;
     const filter = { isActive: true };
     const pageNumber = Math.max(Number(page) || 1, 1);
@@ -113,8 +118,6 @@ router.get('/', async (req, res) => {
         .lean(),
       Product.countDocuments(filter),
     ]);
-
-    res.set('Cache-Control', 'public, max-age=120');
     res.json({ items: products, total });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -340,10 +343,11 @@ router.post('/import', verifyToken, isAdmin, async (req, res) => {
 // Get single product
 router.get('/:id', async (req, res) => {
   try {
+    setFreshCatalogHeaders(res);
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid product id' });
     }
-    const product = await Product.findById(req.params.id)
+    const product = await Product.findOne({ _id: req.params.id, isActive: true })
       .populate({
         path: 'categorySlug',
         populate: { path: 'parent', select: 'name slug' },
