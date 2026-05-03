@@ -91,6 +91,7 @@ router.get('/', async (req, res) => {
       const pattern = escapeRegex(search).slice(0, 80);
       filter.$or = [
         { name: { $regex: pattern, $options: 'i' } },
+        { description: { $regex: pattern, $options: 'i' } },
         { brand: { $regex: pattern, $options: 'i' } },
         { sku: { $regex: pattern, $options: 'i' } },
       ];
@@ -100,7 +101,7 @@ router.get('/', async (req, res) => {
     const skip = (pageNumber - 1) * limitNumber;
     const [products, total] = await Promise.all([
       Product.find(filter)
-        .select('name brand image images basePrice variants.price variants.type variants.sku variants.name variants.image categorySlug featured')
+        .select('name description brand sku image images basePrice variants.price variants.type variants.sku variants.name variants.image categorySlug featured')
         .populate({
           path: 'categorySlug',
           select: 'name slug parent',

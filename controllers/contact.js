@@ -7,9 +7,25 @@ const router = express.Router();
 const escapeHtml = (str) =>
   String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+const clean = (value, max = 200) => String(value || '').trim().slice(0, max);
+
+const buildQuoteContextRows = (quoteContext = {}) => {
+  if (!quoteContext || typeof quoteContext !== 'object') return [];
+
+  return [
+    { label: 'Quote Source', value: clean(quoteContext.source, 80) },
+    { label: 'Product', value: clean(quoteContext.productName, 180) },
+    { label: 'Product ID', value: clean(quoteContext.productId, 80) },
+    { label: 'SKU', value: clean(quoteContext.sku, 80) },
+    { label: 'Category', value: clean(quoteContext.categoryName, 160) },
+    { label: 'Category ID', value: clean(quoteContext.categoryId, 80) },
+    { label: 'Page URL', value: clean(quoteContext.pageUrl, 500) },
+  ].filter((row) => row.value);
+};
+
 router.post('/', async (req, res) => {
   try {
-    const { name, email, phone, message } = req.body;
+    const { name, email, phone, message, quoteContext } = req.body;
 
     if (!name || !email || !phone) {
       return res.status(400).json({ err: 'Name, email, and phone are required.' });
@@ -21,10 +37,11 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ err: 'Please enter a valid email address.' });
     }
 
-    const safeName = String(name).trim().slice(0, 120);
-    const safeEmail = String(email).trim().slice(0, 200);
-    const safePhone = String(phone).trim().slice(0, 40);
-    const safeMessage = String(message || '').trim().slice(0, 2000);
+    const safeName = clean(name, 120);
+    const safeEmail = clean(email, 200);
+    const safePhone = clean(phone, 40);
+    const safeMessage = clean(message, 2000);
+    const quoteRows = buildQuoteContextRows(quoteContext);
 
     const to = getNotificationRecipient(
       'CONTACT_NOTIFY_EMAIL',
@@ -34,12 +51,15 @@ router.post('/', async (req, res) => {
     );
 
     if (to) {
+      const quoteSubject = quoteRows.find((row) => row.label === 'Product')?.value ||
+        quoteRows.find((row) => row.label === 'Category')?.value;
       const text = [
         'A new contact inquiry has been submitted on the LTE website.',
         '',
         `Name: ${safeName}`,
         `Email: ${safeEmail}`,
         `Phone: ${safePhone}`,
+        quoteRows.length ? `Quote context:\n${quoteRows.map((row) => `${row.label}: ${row.value}`).join('\n')}` : '',
         safeMessage ? `Message:\n${safeMessage}` : 'No message provided.',
         '',
         'Regards',
@@ -48,7 +68,7 @@ router.post('/', async (req, res) => {
 
       await sendMail({
         to,
-        subject: `New Contact Inquiry: ${safeName}`,
+        subject: quoteSubject ? `New Quote Inquiry: ${quoteSubject} - ${safeName}` : `New Contact Inquiry: ${safeName}`,
         text,
         html: renderNotificationEmail({
           preheader: 'New contact inquiry from the LTE website',
@@ -58,6 +78,7 @@ router.post('/', async (req, res) => {
             { label: 'Name', value: safeName },
             { label: 'Email', value: safeEmail },
             { label: 'Phone', value: safePhone },
+            ...quoteRows,
             safeMessage ? { label: 'Message', value: safeMessage } : null,
           ].filter(Boolean),
         }),

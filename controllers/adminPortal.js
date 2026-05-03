@@ -23,7 +23,7 @@ const { logActivity } = require('../services/activity-log-service');
 const { sendPushToUser } = require('../services/push-notification-service');
 const { toCsv } = require('../utils/csv');
 const { validatePasswordStrength } = require('../utils/auth-security');
-const { toExtendedJson } = require('../scripts/backupToDrive');
+const { createDatabaseBackupArchive, toExtendedJson } = require('../scripts/backupToDrive');
 
 const router = express.Router();
 
@@ -1313,6 +1313,37 @@ router.get('/full-recovery-export', async (req, res, next) => {
     res.setHeader('Content-Disposition', `attachment; filename="lte-full-recovery-export-${timestamp}.json"`);
     return res.status(200).send(JSON.stringify(payload, null, 2));
   } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/database-backup', async (req, res, next) => {
+  let backup = null;
+
+  try {
+    backup = await createDatabaseBackupArchive();
+
+    await logActivity({
+      user: req.user,
+      action: 'admin_database_backup_downloaded',
+      module: 'backup',
+      metadata: {
+        encrypted: backup.encrypted,
+        collections: backup.collections.length,
+        verifiedCollections: backup.verifiedCollections.length,
+      },
+    });
+
+    res.setHeader('X-Backup-Encrypted', backup.encrypted ? 'true' : 'false');
+    res.setHeader('X-Backup-Collections', String(backup.collections.length));
+    return res.download(backup.archivePath, backup.downloadFilename, (error) => {
+      backup.cleanup();
+      if (error && !res.headersSent) {
+        next(error);
+      }
+    });
+  } catch (error) {
+    if (backup) backup.cleanup();
     return next(error);
   }
 });

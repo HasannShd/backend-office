@@ -123,6 +123,9 @@ app.use('/api/auth', authLimiter);
 app.use('/api/contact', contactLimiter);
 app.use('/api/upload', uploadLimiter);
 app.use('/api/admin-portal/exports', exportLimiter);
+app.use('/api/admin-portal/full-export', exportLimiter);
+app.use('/api/admin-portal/full-recovery-export', exportLimiter);
+app.use('/api/admin-portal/database-backup', exportLimiter);
 app.use('/api/staff-portal/orders/export', exportLimiter);
 app.use('/api/staff-portal/clients/export', exportLimiter);
 

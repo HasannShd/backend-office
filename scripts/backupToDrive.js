@@ -310,22 +310,35 @@ const uploadMetadataToDrive = async (metadataPath, archivePath, folderId) => {
   return uploaded;
 };
 
-const main = async () => {
-  ensureEnv();
+const createDatabaseBackupArchive = async ({
+  prefix = readEnv('BACKUP_PREFIX') || 'lte-backup',
+  mongoUri = readEnv('MONGO_URI'),
+  encrypt = isEncryptionEnabled(),
+} = {}) => {
+  if (!mongoUri) {
+    throw new Error('Missing required env: MONGO_URI');
+  }
 
-  const prefix = readEnv('BACKUP_PREFIX') || 'lte-backup';
   const timestamp = formatTimestamp();
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
   const archivePath = path.join(os.tmpdir(), `${prefix}-${timestamp}.tgz`);
   const encryptedArchivePath = `${archivePath}.enc`;
   const metadataPath = path.join(os.tmpdir(), `${prefix}-${timestamp}.metadata.json`);
-  const mongoUri = readEnv('MONGO_URI');
-  const folderId = readEnv('GDRIVE_FOLDER_ID');
-
   const client = new MongoClient(mongoUri, {
     maxPoolSize: 2,
     serverSelectionTimeoutMS: 20000,
   });
+  let finalArchivePath = archivePath;
+  let cleaned = false;
+
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    fs.rmSync(archivePath, { force: true });
+    fs.rmSync(encryptedArchivePath, { force: true });
+    fs.rmSync(metadataPath, { force: true });
+  };
 
   try {
     await client.connect();
@@ -334,6 +347,7 @@ const main = async () => {
     const meta = {
       database: db.databaseName,
       generatedAt: new Date().toISOString(),
+      encrypted: Boolean(encrypt),
       collections,
     };
     fs.writeFileSync(path.join(tempDir, 'metadata.json'), JSON.stringify(meta, null, 2));
@@ -344,20 +358,48 @@ const main = async () => {
       ['.']
     );
 
-    const finalArchivePath = isEncryptionEnabled() ? encryptedArchivePath : archivePath;
-    if (isEncryptionEnabled()) {
+    if (encrypt) {
+      finalArchivePath = encryptedArchivePath;
       await encryptArchive(archivePath, encryptedArchivePath);
     } else {
-      console.warn('[backup] BACKUP_ENCRYPTION_KEY is not set. Uploading unencrypted archive.');
+      console.warn('[backup] BACKUP_ENCRYPTION_KEY is not set. Creating unencrypted archive.');
     }
 
     const verifiedCollections = await verifyArchive(finalArchivePath);
-    console.log('[backup] Verified archive collections:', verifiedCollections.length);
+
+    return {
+      archivePath: finalArchivePath,
+      metadataPath,
+      filename: getUploadFilename(finalArchivePath),
+      downloadFilename: path.basename(finalArchivePath),
+      metadataFilename: getMetadataFilename(finalArchivePath),
+      collections,
+      verifiedCollections,
+      encrypted: Boolean(encrypt),
+      cleanup,
+    };
+  } catch (error) {
+    cleanup();
+    throw error;
+  } finally {
+    await client.close().catch(() => {});
+  }
+};
+
+const main = async () => {
+  ensureEnv();
+
+  const prefix = readEnv('BACKUP_PREFIX') || 'lte-backup';
+  const folderId = readEnv('GDRIVE_FOLDER_ID');
+  const backup = await createDatabaseBackupArchive({ prefix });
+
+  try {
+    console.log('[backup] Verified archive collections:', backup.verifiedCollections.length);
 
     try {
-      const upload = await uploadToDrive(finalArchivePath, folderId);
+      const upload = await uploadToDrive(backup.archivePath, folderId);
       console.log('Backup uploaded:', upload);
-      const metadataUpload = await uploadMetadataToDrive(metadataPath, finalArchivePath, folderId);
+      const metadataUpload = await uploadMetadataToDrive(backup.metadataPath, backup.archivePath, folderId);
       console.log('Backup metadata uploaded:', metadataUpload);
     } catch (err) {
       const authFailureMessage = getDriveAuthFailureMessage(err);
@@ -367,11 +409,7 @@ const main = async () => {
       throw err;
     }
   } finally {
-    await client.close().catch(() => {});
-    fs.rmSync(tempDir, { recursive: true, force: true });
-    fs.rmSync(archivePath, { force: true });
-    fs.rmSync(encryptedArchivePath, { force: true });
-    fs.rmSync(metadataPath, { force: true });
+    backup.cleanup();
   }
 };
 
@@ -391,5 +429,6 @@ module.exports = {
   getMetadataAliasFilename,
   getDriveAuthFailureMessage,
   isEncryptionEnabled,
+  createDatabaseBackupArchive,
   toExtendedJson,
 };

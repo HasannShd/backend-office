@@ -8,6 +8,7 @@ const {
   getMetadataFilename,
   getMetadataAliasFilename,
   getDriveAuthFailureMessage,
+  createDatabaseBackupArchive,
   toExtendedJson,
 } = require('../scripts/backupToDrive');
 
@@ -99,4 +100,11 @@ test('toExtendedJson serializes ObjectId and Date values', () => {
     _id: { $oid: '507f1f77bcf86cd799439011' },
     createdAt: { $date: '2026-04-14T00:00:00.000Z' },
   });
+});
+
+test('createDatabaseBackupArchive requires a Mongo URI', async () => {
+  await assert.rejects(
+    () => createDatabaseBackupArchive({ mongoUri: '' }),
+    /Missing required env: MONGO_URI/
+  );
 });
