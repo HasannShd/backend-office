@@ -17,19 +17,30 @@ const escapeHtml = (value = '') =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-const firstName = (name = '') => String(name).trim().split(/\s+/)[0] || '';
+const getGreeting = (contact = {}) => {
+  const contactName = String(contact.name || '').trim();
+  const companyName = String(contact.companyName || '').trim();
+  if (contactName) return `Dear ${contactName},`;
+  if (companyName) return `Dear ${companyName} Team,`;
+  return 'Dear Valued Client,';
+};
+
+const getClientReference = (contact = {}) => {
+  const companyName = String(contact.companyName || '').trim();
+  return companyName ? `your team at ${companyName}` : 'your team';
+};
 
 const buildUnsubscribeUrl = (token) => `${API_URL}/api/marketing/unsubscribe/${encodeURIComponent(token)}`;
 
 const renderSocialFollowEmail = ({ contact, subject, previewText, instagramUrl, linkedinUrl }) => {
-  const name = firstName(contact.name || contact.companyName);
-  const greeting = name ? `Hello ${name},` : 'Hello,';
+  const greeting = getGreeting(contact);
+  const clientReference = getClientReference(contact);
   const unsubscribeUrl = buildUnsubscribeUrl(contact.unsubscribeToken);
 
   const text = [
     greeting,
     '',
-    'We would like to stay connected with you through Leading Trading Est updates, product highlights, and sourcing news.',
+    `We would like to stay connected with ${clientReference} through Leading Trading Est updates, product highlights, and sourcing news.`,
     '',
     instagramUrl ? `Instagram: ${instagramUrl}` : '',
     linkedinUrl ? `LinkedIn: ${linkedinUrl}` : '',
@@ -59,7 +70,7 @@ const renderSocialFollowEmail = ({ contact, subject, previewText, instagramUrl, 
             <tr>
               <td style="padding:0 28px 8px;font-size:15px;line-height:1.7;color:#344256;">
                 <p style="margin:0 0 14px;">${escapeHtml(greeting)}</p>
-                <p style="margin:0 0 16px;">We would like to stay connected with you through LTE product updates, sourcing news, and company announcements for Bahrain medical, dental, and industrial supply.</p>
+                <p style="margin:0 0 16px;">We would like to stay connected with ${escapeHtml(clientReference)} through LTE product updates, sourcing news, and company announcements for Bahrain medical, dental, and industrial supply.</p>
                 <p style="margin:0;">Follow our official pages below.</p>
               </td>
             </tr>

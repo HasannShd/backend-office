@@ -10,6 +10,7 @@ const isAdmin = require('../middleware/is-admin');
 const { sendMail, isConfigured: smtpConfigured } = require('../utils/mailer');
 const { renderSocialFollowEmail } = require('../utils/marketing-email');
 
+const INSTAGRAM_URL = 'https://www.instagram.com/leadingtradingest/';
 const LINKEDIN_URL = 'https://www.linkedin.com/company/leading-trading-est/';
 const MAX_IMPORT_ROWS = 2000;
 const MAX_SEND_PER_REQUEST = 1000;
@@ -82,6 +83,7 @@ router.get('/contacts', verifyToken, isAdmin, async (req, res) => {
       contacts: contacts.map(serializeContact),
       totals: { total, eligible, unsubscribed },
       smtpConfigured: Boolean(smtpConfigured),
+      defaultInstagramUrl: INSTAGRAM_URL,
       defaultLinkedinUrl: LINKEDIN_URL,
     });
   } catch (err) {
@@ -154,7 +156,7 @@ router.post('/contacts/sync-clients', verifyToken, isAdmin, async (req, res) => 
 router.post('/campaigns/social-follow/send', verifyToken, isAdmin, async (req, res) => {
   const subject = clean(req.body?.subject || 'Follow Leading Trading Est for product updates', 160);
   const previewText = clean(req.body?.previewText || 'Stay connected with LTE on Instagram and LinkedIn.', 220);
-  const instagramUrl = clean(req.body?.instagramUrl, 300);
+  const instagramUrl = clean(req.body?.instagramUrl || INSTAGRAM_URL, 300);
   const linkedinUrl = clean(req.body?.linkedinUrl || LINKEDIN_URL, 300);
 
   if (!instagramUrl && !linkedinUrl) {
