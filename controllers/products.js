@@ -278,6 +278,73 @@ const resolveCategoryId = (item, categoryLookup) => {
 
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
+const cleanString = (value, limit = 500) => String(value || '').trim().slice(0, limit);
+
+const sanitizeProductPayload = (body = {}) => {
+  const payload = {};
+  if (hasOwn(body, 'name')) payload.name = cleanString(body.name, 180);
+  if (hasOwn(body, 'categorySlug') && mongoose.isValidObjectId(body.categorySlug)) payload.categorySlug = body.categorySlug;
+  if (hasOwn(body, 'description')) payload.description = cleanString(body.description, 2500);
+  if (hasOwn(body, 'image')) payload.image = cleanString(body.image, 800);
+  if (hasOwn(body, 'images') && Array.isArray(body.images)) {
+    payload.images = body.images.map((image) => cleanString(image, 800)).filter(Boolean).slice(0, 12);
+  }
+  if (hasOwn(body, 'sku')) payload.sku = cleanString(body.sku, 120);
+  if (hasOwn(body, 'brand')) payload.brand = cleanString(body.brand, 120);
+  if (hasOwn(body, 'basePrice')) {
+    const price = Number(body.basePrice);
+    payload.basePrice = Number.isFinite(price) && price >= 0 ? price : 0;
+  }
+  if (hasOwn(body, 'featured')) payload.featured = Boolean(body.featured);
+  if (hasOwn(body, 'isActive')) payload.isActive = Boolean(body.isActive);
+  if (hasOwn(body, 'sortOrder')) {
+    const sortOrder = Number(body.sortOrder);
+    if (Number.isFinite(sortOrder)) payload.sortOrder = sortOrder;
+  }
+  if (hasOwn(body, 'specs') && Array.isArray(body.specs)) {
+    payload.specs = body.specs
+      .map((spec) => ({
+        label: cleanString(spec?.label, 120),
+        value: cleanString(spec?.value, 500),
+      }))
+      .filter((spec) => spec.label || spec.value)
+      .slice(0, 40);
+  }
+  if (hasOwn(body, 'variants') && Array.isArray(body.variants)) {
+    payload.variants = body.variants.slice(0, 60).map((variant) => {
+      const price = Number(variant?.price);
+      return {
+        name: cleanString(variant?.name, 140),
+        type: cleanString(variant?.type, 140),
+        sku: cleanString(variant?.sku, 120),
+        image: cleanString(variant?.image, 800),
+        price: Number.isFinite(price) && price >= 0 ? price : 0,
+        isActive: variant?.isActive !== false,
+        sizes: Array.isArray(variant?.sizes)
+          ? variant.sizes.slice(0, 80).map((size) => {
+              const sizePrice = Number(size?.price);
+              return {
+                size: cleanString(size?.size, 120),
+                inches: cleanString(size?.inches, 80),
+                color: cleanString(size?.color, 80),
+                price: Number.isFinite(sizePrice) && sizePrice >= 0 ? sizePrice : undefined,
+                outOfStock: Boolean(size?.outOfStock),
+              };
+            })
+          : [],
+        specs: Array.isArray(variant?.specs)
+          ? variant.specs.slice(0, 40).map((spec) => ({
+              label: cleanString(spec?.label, 120),
+              value: cleanString(spec?.value, 500),
+            }))
+          : [],
+      };
+    });
+  }
+
+  return payload;
+};
+
 const processProductImportItems = async (rawItems = []) => {
   const categoryLookup = await buildCategoryLookup();
   const skipped = [];
@@ -662,7 +729,8 @@ router.get('/:id', async (req, res) => {
 // Create product
 router.post('/', verifyToken, isAdmin, async (req, res) => {
   try {
-    const product = await Product.create(req.body);
+    const payload = sanitizeProductPayload(req.body);
+    const product = await Product.create(payload);
     res.status(201).json(product);
   } catch (err) {
     res.status(400).json({ message: err.message });
@@ -675,9 +743,10 @@ router.put('/:id', verifyToken, isAdmin, async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid product id' });
     }
+    const payload = sanitizeProductPayload(req.body);
     const product = await Product.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      payload,
       { new: true }
     );
     if (!product) {

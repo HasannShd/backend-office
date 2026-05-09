@@ -30,6 +30,12 @@ if (cloudinaryConfigured) {
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter(req, file, callback) {
+    if (!isAllowedUpload(file)) {
+      return callback(new Error('Executable or script file types are not allowed.'));
+    }
+    return callback(null, true);
+  },
 });
 
 const blockedUploadExtensions = new Set([
@@ -60,6 +66,16 @@ const blockedUploadMimes = new Set([
   'application/javascript',
   'application/x-javascript',
 ]);
+const allowedDocumentExtensions = new Set(['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt']);
+const allowedDocumentMimes = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+  'text/plain',
+]);
 
 const getFileExtension = (filename = '') => {
   const match = String(filename).toLowerCase().match(/\.[^.]+$/);
@@ -80,6 +96,9 @@ const isAllowedUpload = (file) => {
   if (blockedUploadExtensions.has(extension)) return false;
   if (blockedUploadMimes.has(mime)) return false;
   if (blockedUploadMimePrefixes.some((prefix) => mime.startsWith(prefix))) return false;
+  if (isImageUpload(file)) return true;
+  if (allowedDocumentExtensions.has(extension) || allowedDocumentMimes.has(mime)) return true;
+  if (!extension && !mime) return false;
   return true;
 };
 

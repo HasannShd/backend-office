@@ -25,7 +25,7 @@ const buildQuoteContextRows = (quoteContext = {}) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { name, email, phone, message, quoteContext } = req.body;
+    const { name, email, phone, company, quantity, urgency, preferredContact, message, quoteContext } = req.body;
 
     if (!name || !email || !phone) {
       return res.status(400).json({ err: 'Name, email, and phone are required.' });
@@ -40,6 +40,10 @@ router.post('/', async (req, res) => {
     const safeName = clean(name, 120);
     const safeEmail = clean(email, 200);
     const safePhone = clean(phone, 40);
+    const safeCompany = clean(company, 180);
+    const safeQuantity = clean(quantity, 120);
+    const safeUrgency = clean(urgency, 80);
+    const safePreferredContact = clean(preferredContact, 80);
     const safeMessage = clean(message, 2000);
     const quoteRows = buildQuoteContextRows(quoteContext);
 
@@ -59,12 +63,16 @@ router.post('/', async (req, res) => {
         `Name: ${safeName}`,
         `Email: ${safeEmail}`,
         `Phone: ${safePhone}`,
+        safeCompany ? `Company / facility: ${safeCompany}` : '',
+        safeQuantity ? `Quantity: ${safeQuantity}` : '',
+        safeUrgency ? `Urgency: ${safeUrgency}` : '',
+        safePreferredContact ? `Preferred contact: ${safePreferredContact}` : '',
         quoteRows.length ? `Quote context:\n${quoteRows.map((row) => `${row.label}: ${row.value}`).join('\n')}` : '',
         safeMessage ? `Message:\n${safeMessage}` : 'No message provided.',
         '',
         'Regards',
         'LTE Website',
-      ].join('\n');
+      ].filter((line) => line !== '').join('\n');
 
       await sendMail({
         to,
@@ -78,6 +86,10 @@ router.post('/', async (req, res) => {
             { label: 'Name', value: safeName },
             { label: 'Email', value: safeEmail },
             { label: 'Phone', value: safePhone },
+            safeCompany ? { label: 'Company / facility', value: safeCompany } : null,
+            safeQuantity ? { label: 'Quantity', value: safeQuantity } : null,
+            safeUrgency ? { label: 'Urgency', value: safeUrgency } : null,
+            safePreferredContact ? { label: 'Preferred contact', value: safePreferredContact } : null,
             ...quoteRows,
             safeMessage ? { label: 'Message', value: safeMessage } : null,
           ].filter(Boolean),

@@ -7,6 +7,7 @@ const marketingContactSchema = new mongoose.Schema(
     name: { type: String, trim: true },
     companyName: { type: String, trim: true },
     phone: { type: String, trim: true },
+    tags: { type: [String], default: [] },
     source: { type: String, trim: true, default: 'manual_import' },
     notes: { type: String, trim: true },
     consentStatus: {
@@ -31,5 +32,6 @@ marketingContactSchema.pre('validate', function assignUnsubscribeToken(next) {
 });
 
 marketingContactSchema.index({ unsubscribedAt: 1, updatedAt: -1 });
+marketingContactSchema.index({ tags: 1, updatedAt: -1 });
 
 module.exports = mongoose.model('MarketingContact', marketingContactSchema);

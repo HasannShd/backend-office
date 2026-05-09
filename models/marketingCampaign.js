@@ -25,6 +25,7 @@ const marketingCampaignSchema = new mongoose.Schema(
     previewText: String,
     instagramUrl: String,
     linkedinUrl: String,
+    audienceTag: String,
     status: {
       type: String,
       enum: ['draft', 'sending', 'completed', 'completed_with_errors', 'failed'],

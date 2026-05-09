@@ -21,20 +21,33 @@ const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const clean = (value, limit = 300) => String(value || '').trim().slice(0, limit);
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
-const CONTACT_FIELDS = ['email', 'name', 'companyName', 'phone', 'source', 'notes', 'consentStatus'];
+const CONTACT_FIELDS = ['email', 'name', 'companyName', 'phone', 'tags', 'source', 'notes', 'consentStatus'];
+
+const normalizeTags = (value) => {
+  const raw = Array.isArray(value) ? value : String(value || '').split(/[;,|]/);
+  return Array.from(
+    new Set(
+      raw
+        .map((tag) => clean(tag, 40).toLowerCase())
+        .filter(Boolean)
+    )
+  ).slice(0, 12);
+};
 
 const normalizeContactPayload = (row = {}) => {
   const email = normalizeEmail(row.email || row.Email || row['Email Address'] || row['email address']);
   const name = clean(row.name || row.Name || row.contactName || row['Contact Name'] || row.contact_person || row.contactPerson, 160);
   const companyName = clean(row.companyName || row.Company || row.company || row['Company Name'] || row.facility || row.Facility, 180);
   const phone = clean(row.phone || row.Phone || row.mobile || row.Mobile, 80);
+  const rawTags = row.tags || row.Tags || row.department || row.Department || row.type || row.Type;
+  const tags = rawTags ? normalizeTags(rawTags) : undefined;
   const source = clean(row.source || row.Source || 'manual_import', 80);
   const notes = clean(row.notes || row.Notes, 500);
   const consentStatus = ['existing_client', 'opted_in', 'unknown'].includes(row.consentStatus)
     ? row.consentStatus
     : 'existing_client';
 
-  return { email, name, companyName, phone, source, notes, consentStatus };
+  return { email, name, companyName, phone, tags, source, notes, consentStatus };
 };
 
 const serializeContact = (contact) => ({
@@ -43,6 +56,7 @@ const serializeContact = (contact) => ({
   name: contact.name || '',
   companyName: contact.companyName || '',
   phone: contact.phone || '',
+  tags: Array.isArray(contact.tags) ? contact.tags : [],
   source: contact.source || '',
   consentStatus: contact.unsubscribedAt ? 'unsubscribed' : contact.consentStatus,
   unsubscribedAt: contact.unsubscribedAt,
@@ -77,13 +91,22 @@ const upsertContact = async (payload, userId) => {
 
 router.get('/contacts', verifyToken, isAdmin, async (req, res) => {
   try {
-    const contacts = await MarketingContact.find({}).sort({ updatedAt: -1 }).limit(500).lean();
+    const tagFilter = clean(req.query?.tag, 40).toLowerCase();
+    const filter = tagFilter ? { tags: tagFilter } : {};
+    const contacts = await MarketingContact.find(filter).sort({ updatedAt: -1 }).limit(500).lean();
     const total = await MarketingContact.countDocuments({});
     const eligible = await MarketingContact.countDocuments({ unsubscribedAt: { $exists: false } });
     const unsubscribed = await MarketingContact.countDocuments({ unsubscribedAt: { $exists: true } });
+    const tagRows = await MarketingContact.aggregate([
+      { $unwind: '$tags' },
+      { $group: { _id: '$tags', count: { $sum: 1 } } },
+      { $sort: { count: -1, _id: 1 } },
+      { $limit: 40 },
+    ]);
     res.json({
       contacts: contacts.map(serializeContact),
       totals: { total, eligible, unsubscribed },
+      tags: tagRows.map((row) => ({ tag: row._id, count: row.count })),
       smtpConfigured: Boolean(smtpConfigured),
       defaultInstagramUrl: INSTAGRAM_URL,
       defaultLinkedinUrl: LINKEDIN_URL,
@@ -155,18 +178,34 @@ router.post('/contacts/sync-clients', verifyToken, isAdmin, async (req, res) => 
   }
 });
 
+router.patch('/contacts/:id/tags', verifyToken, isAdmin, async (req, res) => {
+  try {
+    const contact = await MarketingContact.findById(req.params.id);
+    if (!contact) return res.status(404).json({ err: 'Contact not found.' });
+    contact.tags = normalizeTags(req.body?.tags);
+    await contact.save();
+    return res.json(serializeContact(contact));
+  } catch (err) {
+    return res.status(400).json({ err: err.message || 'Could not update tags.' });
+  }
+});
+
 router.post('/campaigns/social-follow/send', verifyToken, isAdmin, async (req, res) => {
   const subject = clean(req.body?.subject || 'Stay Connected With Leading Trading Est', 160);
   const previewText = clean(req.body?.previewText || 'A quick note from Leading Trading Est.', 220);
   const instagramUrl = clean(req.body?.instagramUrl || INSTAGRAM_URL, 300);
   const linkedinUrl = clean(req.body?.linkedinUrl || LINKEDIN_URL, 300);
+  const tag = clean(req.body?.tag || '', 40).toLowerCase();
 
   if (!instagramUrl && !linkedinUrl) {
     return res.status(400).json({ err: 'Add at least one social page URL.' });
   }
 
   try {
-    const contacts = await MarketingContact.find({ unsubscribedAt: { $exists: false } })
+    const contactFilter = tag
+      ? { unsubscribedAt: { $exists: false }, tags: tag }
+      : { unsubscribedAt: { $exists: false } };
+    const contacts = await MarketingContact.find(contactFilter)
       .sort({ updatedAt: -1 })
       .limit(MAX_SEND_PER_REQUEST);
 
@@ -178,6 +217,7 @@ router.post('/campaigns/social-follow/send', verifyToken, isAdmin, async (req, r
       previewText,
       instagramUrl,
       linkedinUrl,
+      audienceTag: tag,
       createdBy: req.user?._id,
       status: 'sending',
       startedAt: new Date(),
@@ -254,7 +294,7 @@ router.get('/campaigns', verifyToken, isAdmin, async (req, res) => {
     const campaigns = await MarketingCampaign.find({})
       .sort({ createdAt: -1 })
       .limit(20)
-      .select('subject status totals createdAt startedAt completedAt instagramUrl linkedinUrl')
+      .select('subject status totals createdAt startedAt completedAt instagramUrl linkedinUrl audienceTag')
       .lean();
     res.json(campaigns);
   } catch (err) {
