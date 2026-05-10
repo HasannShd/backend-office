@@ -28,10 +28,11 @@ const marketingCampaignSchema = new mongoose.Schema(
     audienceTag: String,
     status: {
       type: String,
-      enum: ['draft', 'sending', 'completed', 'completed_with_errors', 'failed'],
+      enum: ['draft', 'scheduled', 'sending', 'completed', 'completed_with_errors', 'failed'],
       default: 'draft',
     },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    scheduledAt: Date,
     startedAt: Date,
     completedAt: Date,
     totals: {
@@ -47,5 +48,6 @@ const marketingCampaignSchema = new mongoose.Schema(
 
 marketingCampaignSchema.index({ createdAt: -1 });
 marketingCampaignSchema.index({ status: 1, createdAt: -1 });
+marketingCampaignSchema.index({ status: 1, scheduledAt: 1 });
 
 module.exports = mongoose.model('MarketingCampaign', marketingCampaignSchema);

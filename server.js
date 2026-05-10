@@ -35,6 +35,7 @@ const app = express();
 const port = process.env.PORT || 5000;
 let mongoReady = false;
 let mongoConnectInFlight = false;
+let marketingSchedulerStarted = false;
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
@@ -218,6 +219,12 @@ const connectToMongo = async () => {
       serverSelectionTimeoutMS: 15000,
       family: 4,
     });
+    if (!marketingSchedulerStarted && typeof marketingRoutes.processDueScheduledCampaigns === 'function') {
+      marketingSchedulerStarted = true;
+      marketingRoutes.processDueScheduledCampaigns();
+      setInterval(marketingRoutes.processDueScheduledCampaigns, 60000);
+      console.log('Marketing campaign scheduler started.');
+    }
   } catch (err) {
     console.error('MongoDB connection error:', err);
   } finally {

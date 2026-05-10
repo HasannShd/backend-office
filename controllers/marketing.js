@@ -16,6 +16,7 @@ const CAMPAIGN_FROM = 'hrleading1@gmail.com';
 const CAMPAIGN_CC = 'admin@lte-bh.com';
 const MAX_IMPORT_ROWS = 2000;
 const MAX_SEND_PER_REQUEST = 1000;
+let scheduledProcessing = false;
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const clean = (value, limit = 300) => String(value || '').trim().slice(0, limit);
@@ -32,6 +33,12 @@ const normalizeTags = (value) => {
         .filter(Boolean)
     )
   ).slice(0, 12);
+};
+
+const parseScheduledAt = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 };
 
 const normalizeContactPayload = (row = {}) => {
@@ -87,6 +94,128 @@ const upsertContact = async (payload, userId) => {
 
   const created = await MarketingContact.create({ ...payload, importedBy: userId });
   return { created: true, contact: created };
+};
+
+const buildContactFilter = (tag) => (
+  tag
+    ? { unsubscribedAt: { $exists: false }, tags: tag }
+    : { unsubscribedAt: { $exists: false } }
+);
+
+const finalizeCampaignStatus = (campaign) => {
+  campaign.status = campaign.totals.failed
+    ? 'completed_with_errors'
+    : campaign.totals.sent
+      ? 'completed'
+      : 'failed';
+  campaign.completedAt = new Date();
+};
+
+const sendCampaignNow = async (campaign) => {
+  if (!campaign) return null;
+
+  const contactIds = campaign.recipients
+    .map((recipient) => recipient.contact)
+    .filter(Boolean);
+  const contacts = await MarketingContact.find({ _id: { $in: contactIds } });
+  const contactById = new Map(contacts.map((contact) => [String(contact._id), contact]));
+
+  campaign.status = 'sending';
+  campaign.startedAt = campaign.startedAt || new Date();
+  campaign.totals.sent = 0;
+  campaign.totals.skipped = 0;
+  campaign.totals.failed = 0;
+
+  for (const recipient of campaign.recipients) {
+    if (recipient.status && recipient.status !== 'pending') {
+      if (recipient.status === 'sent') campaign.totals.sent += 1;
+      else if (recipient.status === 'skipped') campaign.totals.skipped += 1;
+      else if (recipient.status === 'failed') campaign.totals.failed += 1;
+      continue;
+    }
+
+    const contact = recipient.contact ? contactById.get(String(recipient.contact)) : null;
+    if (!contact || contact.unsubscribedAt) {
+      recipient.status = 'skipped';
+      recipient.error = contact ? 'Unsubscribed' : 'Contact not found';
+      campaign.totals.skipped += 1;
+      continue;
+    }
+
+    if (!isValidEmail(contact.email)) {
+      recipient.status = 'skipped';
+      recipient.error = 'Invalid email';
+      campaign.totals.skipped += 1;
+      continue;
+    }
+
+    try {
+      const { text, html } = renderSocialFollowEmail({
+        contact,
+        subject: campaign.subject,
+        previewText: campaign.previewText,
+        instagramUrl: campaign.instagramUrl,
+        linkedinUrl: campaign.linkedinUrl,
+      });
+      const result = await sendMail({
+        from: CAMPAIGN_FROM,
+        to: contact.email,
+        cc: CAMPAIGN_CC,
+        replyTo: CAMPAIGN_CC,
+        subject: campaign.subject,
+        text,
+        html,
+      });
+      if (result?.skipped) {
+        recipient.status = 'skipped';
+        recipient.error = 'SMTP not configured';
+        campaign.totals.skipped += 1;
+      } else {
+        recipient.status = 'sent';
+        recipient.messageId = result?.messageId || '';
+        recipient.sentAt = new Date();
+        campaign.totals.sent += 1;
+        contact.lastCampaignSentAt = recipient.sentAt;
+        contact.lastCampaignSubject = campaign.subject;
+        await contact.save();
+      }
+    } catch (err) {
+      recipient.status = 'failed';
+      recipient.error = err.message;
+      campaign.totals.failed += 1;
+    }
+  }
+
+  finalizeCampaignStatus(campaign);
+  campaign.markModified('recipients');
+  await campaign.save();
+  return campaign;
+};
+
+const processDueScheduledCampaigns = async () => {
+  if (scheduledProcessing) return;
+  scheduledProcessing = true;
+
+  try {
+    let campaign = await MarketingCampaign.findOneAndUpdate(
+      { status: 'scheduled', scheduledAt: { $lte: new Date() } },
+      { $set: { status: 'sending', startedAt: new Date() } },
+      { sort: { scheduledAt: 1 }, new: true }
+    );
+
+    while (campaign) {
+      await sendCampaignNow(campaign);
+      campaign = await MarketingCampaign.findOneAndUpdate(
+        { status: 'scheduled', scheduledAt: { $lte: new Date() } },
+        { $set: { status: 'sending', startedAt: new Date() } },
+        { sort: { scheduledAt: 1 }, new: true }
+      );
+    }
+  } catch (err) {
+    console.error('[marketing] scheduled campaign processing failed:', err);
+  } finally {
+    scheduledProcessing = false;
+  }
 };
 
 router.get('/contacts', verifyToken, isAdmin, async (req, res) => {
@@ -196,16 +325,18 @@ router.post('/campaigns/social-follow/send', verifyToken, isAdmin, async (req, r
   const instagramUrl = clean(req.body?.instagramUrl || INSTAGRAM_URL, 300);
   const linkedinUrl = clean(req.body?.linkedinUrl || LINKEDIN_URL, 300);
   const tag = clean(req.body?.tag || '', 40).toLowerCase();
+  const scheduledAt = parseScheduledAt(req.body?.scheduledAt);
 
   if (!instagramUrl && !linkedinUrl) {
     return res.status(400).json({ err: 'Add at least one social page URL.' });
   }
 
+  if (req.body?.scheduledAt && !scheduledAt) {
+    return res.status(400).json({ err: 'Scheduled date is invalid.' });
+  }
+
   try {
-    const contactFilter = tag
-      ? { unsubscribedAt: { $exists: false }, tags: tag }
-      : { unsubscribedAt: { $exists: false } };
-    const contacts = await MarketingContact.find(contactFilter)
+    const contacts = await MarketingContact.find(buildContactFilter(tag))
       .sort({ updatedAt: -1 })
       .limit(MAX_SEND_PER_REQUEST);
 
@@ -219,8 +350,9 @@ router.post('/campaigns/social-follow/send', verifyToken, isAdmin, async (req, r
       linkedinUrl,
       audienceTag: tag,
       createdBy: req.user?._id,
-      status: 'sending',
-      startedAt: new Date(),
+      status: scheduledAt && scheduledAt.getTime() > Date.now() ? 'scheduled' : 'sending',
+      scheduledAt: scheduledAt || undefined,
+      startedAt: scheduledAt && scheduledAt.getTime() > Date.now() ? undefined : new Date(),
       totals: { targeted: contacts.length, sent: 0, skipped: 0, failed: 0 },
       recipients: contacts.map((contact) => ({
         contact: contact._id,
@@ -230,53 +362,17 @@ router.post('/campaigns/social-follow/send', verifyToken, isAdmin, async (req, r
       })),
     });
 
-    for (const contact of contacts) {
-      const recipient = campaign.recipients.find((entry) => entry.email === contact.email);
-      if (!isValidEmail(contact.email)) {
-        recipient.status = 'skipped';
-        recipient.error = 'Invalid email';
-        campaign.totals.skipped += 1;
-        continue;
-      }
-
-      try {
-        const { text, html } = renderSocialFollowEmail({ contact, subject, previewText, instagramUrl, linkedinUrl });
-        const result = await sendMail({
-          from: CAMPAIGN_FROM,
-          to: contact.email,
-          cc: CAMPAIGN_CC,
-          replyTo: CAMPAIGN_CC,
-          subject,
-          text,
-          html,
-        });
-        if (result?.skipped) {
-          recipient.status = 'skipped';
-          recipient.error = 'SMTP not configured';
-          campaign.totals.skipped += 1;
-        } else {
-          recipient.status = 'sent';
-          recipient.messageId = result?.messageId || '';
-          recipient.sentAt = new Date();
-          campaign.totals.sent += 1;
-          contact.lastCampaignSentAt = recipient.sentAt;
-          contact.lastCampaignSubject = subject;
-          await contact.save();
-        }
-      } catch (err) {
-        recipient.status = 'failed';
-        recipient.error = err.message;
-        campaign.totals.failed += 1;
-      }
+    if (campaign.status === 'scheduled') {
+      return res.json({
+        campaignId: campaign._id,
+        status: campaign.status,
+        scheduledAt: campaign.scheduledAt,
+        totals: campaign.totals,
+        smtpConfigured: Boolean(smtpConfigured),
+      });
     }
 
-    campaign.status = campaign.totals.failed
-      ? 'completed_with_errors'
-      : campaign.totals.sent
-        ? 'completed'
-        : 'failed';
-    campaign.completedAt = new Date();
-    await campaign.save();
+    await sendCampaignNow(campaign);
 
     res.json({
       campaignId: campaign._id,
@@ -294,7 +390,7 @@ router.get('/campaigns', verifyToken, isAdmin, async (req, res) => {
     const campaigns = await MarketingCampaign.find({})
       .sort({ createdAt: -1 })
       .limit(20)
-      .select('subject status totals createdAt startedAt completedAt instagramUrl linkedinUrl audienceTag')
+      .select('subject status totals createdAt scheduledAt startedAt completedAt instagramUrl linkedinUrl audienceTag')
       .lean();
     res.json(campaigns);
   } catch (err) {
@@ -327,3 +423,4 @@ router.get('/unsubscribe/:token', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.processDueScheduledCampaigns = processDueScheduledCampaigns;
