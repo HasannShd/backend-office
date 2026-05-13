@@ -1,14 +1,73 @@
 const express = require('express');
+const path = require('path');
+const crypto = require('crypto');
+const multer = require('multer');
 const { sendMail, getNotificationRecipient } = require('../utils/mailer');
 const { renderNotificationEmail } = require('../utils/notification-email');
 const ContactInquiry = require('../models/contactInquiry');
 
 const router = express.Router();
 
+const RFQ_ALLOWED_EXTENSIONS = new Set(['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv']);
+const RFQ_ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+  'application/csv',
+  'text/plain',
+]);
+
+const isAllowedRfqFile = (file = {}) => {
+  const extension = path.extname(file.originalname || '').toLowerCase();
+  const mimetype = String(file.mimetype || '').toLowerCase();
+  return RFQ_ALLOWED_EXTENSIONS.has(extension) && (!mimetype || RFQ_ALLOWED_MIME_TYPES.has(mimetype));
+};
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) => {
+    if (!isAllowedRfqFile(file)) {
+      cb(new Error('RFQ attachment must be a PDF, Word, Excel, or CSV document.'));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+const uploadRfq = (req, res, next) => {
+  upload.single('rfqFile')(req, res, (error) => {
+    if (!error) {
+      next();
+      return;
+    }
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ err: 'RFQ attachment must be 8 MB or smaller.' });
+    }
+    return res.status(400).json({ err: error.message || 'RFQ attachment could not be accepted.' });
+  });
+};
+
 const escapeHtml = (str) =>
   String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 const clean = (value, max = 200) => String(value || '').trim().slice(0, max);
+
+const parseQuoteContext = (value) => {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const hasConsent = (value) => value === true || value === 'true' || value === 'on' || value === '1';
 
 const verifyTurnstile = async ({ token, ipAddress }) => {
   const secret = process.env.TURNSTILE_SECRET_KEY || process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY;
@@ -44,7 +103,7 @@ const buildQuoteContextRows = (quoteContext = {}) => {
   ].filter((row) => row.value);
 };
 
-router.post('/', async (req, res) => {
+router.post('/', uploadRfq, async (req, res) => {
   try {
     const {
       name,
@@ -55,16 +114,16 @@ router.post('/', async (req, res) => {
       urgency,
       preferredContact,
       message,
-      quoteContext,
       consent,
       turnstileToken,
       cfTurnstileToken,
     } = req.body;
+    const quoteContext = parseQuoteContext(req.body.quoteContext);
 
     if (!name || !email || !phone) {
       return res.status(400).json({ err: 'Name, email, and phone are required.' });
     }
-    if (consent !== true) {
+    if (!hasConsent(consent)) {
       return res.status(400).json({ err: 'Consent is required before submitting an inquiry.' });
     }
     if (String(name).trim().length < 2) {
@@ -99,6 +158,12 @@ router.post('/', async (req, res) => {
       categoryName: clean(quoteContext?.categoryName, 160),
       pageUrl: clean(quoteContext?.pageUrl, 500),
     };
+    const rfqAttachment = req.file && isAllowedRfqFile(req.file) ? {
+      originalName: clean(req.file.originalname, 240),
+      storedName: `rfq_${crypto.randomBytes(12).toString('hex')}${path.extname(req.file.originalname || '').toLowerCase()}`,
+      mimeType: clean(req.file.mimetype, 120),
+      size: req.file.size,
+    } : null;
 
     const inquiry = await ContactInquiry.create({
       name: safeName,
@@ -110,6 +175,7 @@ router.post('/', async (req, res) => {
       preferredContact: safePreferredContact,
       message: safeMessage,
       quoteContext: safeQuoteContext,
+      attachments: rfqAttachment ? [rfqAttachment] : [],
       consent: true,
       userAgent: clean(req.get('user-agent'), 500),
       ipAddress: clean(req.ip, 80),
@@ -135,6 +201,7 @@ router.post('/', async (req, res) => {
         safeQuantity ? `Quantity: ${safeQuantity}` : '',
         safeUrgency ? `Urgency: ${safeUrgency}` : '',
         safePreferredContact ? `Preferred contact: ${safePreferredContact}` : '',
+        rfqAttachment ? `RFQ attachment: ${rfqAttachment.originalName} (${rfqAttachment.size} bytes)` : '',
         quoteRows.length ? `Quote context:\n${quoteRows.map((row) => `${row.label}: ${row.value}`).join('\n')}` : '',
         safeMessage ? `Message:\n${safeMessage}` : 'No message provided.',
         '',
@@ -160,10 +227,18 @@ router.post('/', async (req, res) => {
               safeQuantity ? { label: 'Quantity', value: safeQuantity } : null,
               safeUrgency ? { label: 'Urgency', value: safeUrgency } : null,
               safePreferredContact ? { label: 'Preferred contact', value: safePreferredContact } : null,
+              rfqAttachment ? { label: 'RFQ attachment', value: `${rfqAttachment.originalName} (${rfqAttachment.size} bytes)` } : null,
               ...quoteRows,
               safeMessage ? { label: 'Message', value: safeMessage } : null,
             ].filter(Boolean),
           }),
+          attachments: req.file && rfqAttachment ? [
+            {
+              filename: rfqAttachment.storedName,
+              content: req.file.buffer,
+              contentType: req.file.mimetype,
+            },
+          ] : undefined,
         });
         inquiry.status = 'notified';
         await inquiry.save();

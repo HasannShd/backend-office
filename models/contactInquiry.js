@@ -24,6 +24,14 @@ const contactInquirySchema = new mongoose.Schema(
     preferredContact: { type: String, trim: true },
     message: { type: String, trim: true },
     quoteContext: quoteContextSchema,
+    attachments: [
+      {
+        originalName: String,
+        storedName: String,
+        mimeType: String,
+        size: Number,
+      },
+    ],
     consent: { type: Boolean, default: false },
     status: {
       type: String,
