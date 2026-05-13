@@ -1,16 +1,57 @@
 const express = require('express');
 const multer = require('multer');
+const path = require('path');
+const crypto = require('crypto');
 const { sendMail, getNotificationRecipient } = require('../utils/mailer');
 const { renderNotificationEmail } = require('../utils/notification-email');
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const allowedCvExtensions = new Set(['.pdf', '.doc', '.docx']);
+const allowedCvMimeTypes = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
 
-router.post('/apply', upload.single('cv'), async (req, res) => {
+const isAllowedCvFile = (file) => {
+  const extension = path.extname(file.originalname || '').toLowerCase();
+  return allowedCvExtensions.has(extension) && allowedCvMimeTypes.has(file.mimetype);
+};
+
+const buildSafeCvFilename = (file) => {
+  const extension = path.extname(file.originalname || '').toLowerCase();
+  return `cv_${crypto.randomBytes(12).toString('hex')}${extension}`;
+};
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, callback) => {
+    if (!isAllowedCvFile(file)) {
+      return callback(new Error('Only PDF, DOC, or DOCX CV files are accepted.'));
+    }
+    return callback(null, true);
+  },
+});
+
+const uploadCv = (req, res, next) => {
+  upload.single('cv')(req, res, (error) => {
+    if (!error) return next();
+    const message = error.code === 'LIMIT_FILE_SIZE'
+      ? 'CV file must be 5MB or smaller.'
+      : error.message || 'Invalid CV file upload.';
+    return res.status(400).json({ message });
+  });
+};
+
+router.post('/apply', uploadCv, async (req, res) => {
   try {
     const { name, phone, nationality, email } = req.body;
     if (!name || !phone || !nationality || !req.file) {
       return res.status(400).json({ message: 'All fields and CV are required.' });
+    }
+    if (!isAllowedCvFile(req.file)) {
+      return res.status(400).json({ message: 'Only PDF, DOC, or DOCX CV files are accepted.' });
     }
 
     const to = getNotificationRecipient(
@@ -59,8 +100,9 @@ router.post('/apply', upload.single('cv'), async (req, res) => {
         }),
         attachments: [
           {
-            filename: req.file.originalname,
+            filename: buildSafeCvFilename(req.file),
             content: req.file.buffer,
+            contentType: req.file.mimetype,
           },
         ],
       });
