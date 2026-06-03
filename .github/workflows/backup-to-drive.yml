@@ -134,6 +134,10 @@ jobs:
             const body = [
               'Backup workflow failed.',
               '',
+              'Latest confirmed failure: the Google Drive OAuth refresh token is expired or revoked. The MongoDB archive was created and verified, but Drive upload failed.',
+              '',
+              'Fix: update the `GDRIVE_OAUTH_REFRESH_TOKEN` repository secret with a newly generated refresh token, or configure `GDRIVE_SERVICE_ACCOUNT_JSON` and share the Drive folder with that service account.',
+              '',
               `- Run number: ${context.runNumber}`,
               `- Event: ${context.eventName}`,
               `- Commit: ${context.sha}`,

@@ -27,6 +27,10 @@ const ensureEnv = () => {
 };
 
 const isEncryptionEnabled = () => Boolean(readEnv('BACKUP_ENCRYPTION_KEY'));
+const shouldWarnAboutUnencryptedArchive = ({
+  encrypt,
+  encryptionEnabled = isEncryptionEnabled(),
+} = {}) => !encrypt && !encryptionEnabled;
 
 const isInvalidGoogleGrant = (err) =>
   err?.response?.data?.error === 'invalid_grant' ||
@@ -361,7 +365,7 @@ const createDatabaseBackupArchive = async ({
     if (encrypt) {
       finalArchivePath = encryptedArchivePath;
       await encryptArchive(archivePath, encryptedArchivePath);
-    } else {
+    } else if (shouldWarnAboutUnencryptedArchive({ encrypt })) {
       console.warn('[backup] BACKUP_ENCRYPTION_KEY is not set. Creating unencrypted archive.');
     }
 
@@ -429,6 +433,7 @@ module.exports = {
   getMetadataAliasFilename,
   getDriveAuthFailureMessage,
   isEncryptionEnabled,
+  shouldWarnAboutUnencryptedArchive,
   createDatabaseBackupArchive,
   toExtendedJson,
 };

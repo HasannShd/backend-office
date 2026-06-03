@@ -77,6 +77,7 @@ const corsOptions = {
     return callback(new Error('Origin is not allowed by CORS'));
   },
   credentials: true,
+  exposedHeaders: ['Content-Disposition', 'X-Backup-Encrypted', 'X-Backup-Collections'],
   optionsSuccessStatus: 204,
 };
 

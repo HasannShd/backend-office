@@ -8,6 +8,7 @@ const {
   getMetadataFilename,
   getMetadataAliasFilename,
   getDriveAuthFailureMessage,
+  shouldWarnAboutUnencryptedArchive,
   createDatabaseBackupArchive,
   toExtendedJson,
 } = require('../scripts/backupToDrive');
@@ -86,6 +87,21 @@ test('getDriveAuthFailureMessage explains revoked OAuth refresh token', () => {
 
   assert.match(message, /GDRIVE_OAUTH_REFRESH_TOKEN/);
   assert.match(message, /created and verified/);
+});
+
+test('shouldWarnAboutUnencryptedArchive only warns when encryption is unavailable', () => {
+  assert.equal(
+    shouldWarnAboutUnencryptedArchive({ encrypt: false, encryptionEnabled: false }),
+    true
+  );
+  assert.equal(
+    shouldWarnAboutUnencryptedArchive({ encrypt: false, encryptionEnabled: true }),
+    false
+  );
+  assert.equal(
+    shouldWarnAboutUnencryptedArchive({ encrypt: true, encryptionEnabled: true }),
+    false
+  );
 });
 
 test('toExtendedJson serializes ObjectId and Date values', () => {

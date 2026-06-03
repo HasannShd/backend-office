@@ -1321,7 +1321,7 @@ router.get('/database-backup', async (req, res, next) => {
   let backup = null;
 
   try {
-    backup = await createDatabaseBackupArchive();
+    backup = await createDatabaseBackupArchive({ encrypt: false });
 
     await logActivity({
       user: req.user,
